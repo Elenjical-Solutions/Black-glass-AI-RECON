@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, use } from "react"
+import { useState, useEffect, useCallback, use, Fragment } from "react"
 import { getRunByIdAction, getRunWithContextAction } from "@/actions/runs-actions"
 import {
   getResultsAction,
@@ -686,9 +686,8 @@ export default function RunResultsPage({
             </TableHeader>
             <TableBody>
               {results.map(result => (
-                <>
+                <Fragment key={result.id}>
                   <TableRow
-                    key={result.id}
                     className={cn(
                       "cursor-pointer",
                       expandedRows.has(result.id) && "bg-accent/20"
@@ -849,7 +848,7 @@ export default function RunResultsPage({
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </Fragment>
               ))}
             </TableBody>
           </Table>
