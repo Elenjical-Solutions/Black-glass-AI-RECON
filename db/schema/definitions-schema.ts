@@ -23,6 +23,8 @@ export const reconciliationDefinitionsTable = pgTable(
       () => uploadedFilesTable.id,
       { onDelete: "cascade" }
     ),
+    category: text("category"), // "core" | "sensitivity" | "downstream"
+    department: text("department"), // "IR" | "EQ" | "FX" | "COM" | "Finance" | "Market Risk" | etc.
     keyFields: jsonb("key_fields").notNull().default([]),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")

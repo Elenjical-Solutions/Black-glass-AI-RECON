@@ -47,7 +47,8 @@ const db = drizzle(client)
 // ── Seed Configuration ──────────────────────────────────────────────────
 const TOTAL_TRADES = 10_000
 const MATCH_RATE = 0.80 // 80% perfect match
-const SEED_USER_ID = "seed-demo-user"
+// Set this to your Clerk user ID, or pass SEED_USER_ID env var
+const SEED_USER_ID = process.env.SEED_USER_ID || "user_3BzQhhEIkF9GxlLuLgP5hXNCW52"
 
 // ── Reference Data ──────────────────────────────────────────────────────
 
@@ -1090,7 +1091,7 @@ async function seed() {
       id: expKeyIds[ek.code],
       code: ek.code,
       label: ek.label,
-      autoMatchPattern: ek.autoMatchPattern,
+      autoMatchPattern: ek.autoMatchPattern as any,
     })),
   })
 
