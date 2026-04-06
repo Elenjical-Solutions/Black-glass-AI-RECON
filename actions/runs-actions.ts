@@ -15,6 +15,15 @@ import { ReconciliationRun } from "@/db/schema/runs-schema"
 import { eq } from "drizzle-orm"
 import { runReconciliation, ReconConfig } from "@/lib/recon/engine"
 import { parseFile, detectFormat } from "@/lib/recon/parsers"
+import {
+  runChunkedReconciliation,
+  recommendChunkSize,
+  ChunkedReconConfig,
+  ChunkResult
+} from "@/lib/streaming/chunked-processor"
+
+/** Threshold above which we switch from in-memory to chunked processing */
+const CHUNKED_THRESHOLD = 10_000
 
 export async function triggerRunAction(
   cycleId: string,
@@ -33,6 +42,12 @@ export async function triggerRunAction(
       .returning()
 
     try {
+      // Update status to processing
+      await db
+        .update(reconciliationRunsTable)
+        .set({ status: "processing" })
+        .where(eq(reconciliationRunsTable.id, run.id))
+
       // Load definition
       const [definition] = await db
         .select()
@@ -80,7 +95,7 @@ export async function triggerRunAction(
       const parsedA = parseFile(fileA.fileContent, formatA)
       const parsedB = parseFile(fileB.fileContent, formatB)
 
-      // Build recon config
+      // Build shared config pieces
       const keyMappings = mappings.filter(m => m.isKey)
       const keyFields = keyMappings.map(m => ({
         fieldA: m.fieldNameA,
@@ -102,76 +117,159 @@ export async function triggerRunAction(
         autoMatchPattern: ek.autoMatchPattern as any
       }))
 
-      const config: ReconConfig = {
-        keyFields,
-        fieldMappings: fieldMappingsConfig,
-        explanationKeys: explanationKeyRules
-      }
-
-      // Run reconciliation
-      const output = runReconciliation(parsedA, parsedB, config)
-
-      // Build a mapping of fieldNameA -> fieldMappingId for field details
+      // Build a mapping of fieldNameA -> fieldMappingId for DB writes
       const fieldMappingIdMap = new Map<string, string>()
       for (const m of mappings) {
         fieldMappingIdMap.set(m.fieldNameA, m.id)
       }
 
-      // Save results in batch
-      for (const result of output.results) {
-        const [savedResult] = await db
-          .insert(reconciliationResultsTable)
-          .values({
-            runId: run.id,
-            rowKeyValue: result.keyValue,
-            sourceARowIndex: result.sourceARowIndex,
-            sourceBRowIndex: result.sourceBRowIndex,
-            status: result.status,
-            explanationKeyId: result.explanationKeyId ?? null,
-            aiExplanation: result.explanationReason ?? null,
-            isPropagated: false
-          })
-          .returning()
+      // Helper: persist a batch of results to DB
+      async function persistResultsBatch(
+        results: Array<{
+          keyValue: string
+          sourceARowIndex: number | null
+          sourceBRowIndex: number | null
+          status: string
+          fields: Array<{
+            fieldNameA: string
+            valueA: string | null
+            valueB: string | null
+            isMatch: boolean
+            matcherResult: { numericDiff?: number } & Record<string, unknown>
+          }>
+          explanationKeyId?: string
+          explanationReason?: string
+        }>
+      ) {
+        // Batch insert results (up to 500 at a time for Postgres param limits)
+        const BATCH_SIZE = 500
+        for (let i = 0; i < results.length; i += BATCH_SIZE) {
+          const batch = results.slice(i, i + BATCH_SIZE)
+          const insertedResults = await db
+            .insert(reconciliationResultsTable)
+            .values(
+              batch.map(result => ({
+                runId: run.id,
+                rowKeyValue: result.keyValue,
+                sourceARowIndex: result.sourceARowIndex,
+                sourceBRowIndex: result.sourceBRowIndex,
+                status: result.status,
+                explanationKeyId: result.explanationKeyId ?? null,
+                aiExplanation: result.explanationReason ?? null,
+                isPropagated: false
+              }))
+            )
+            .returning({ id: reconciliationResultsTable.id })
 
-        // Save field details for this result
-        if (result.fields.length > 0) {
-          const fieldDetailValues = result.fields
-            .map(field => {
+          // Collect all field details for this batch
+          const allFieldDetails: Array<{
+            resultId: string
+            fieldMappingId: string
+            valueA: string | null
+            valueB: string | null
+            numericDiff: string | null
+            isMatch: boolean
+            matcherOutput: unknown
+          }> = []
+
+          for (let j = 0; j < batch.length; j++) {
+            const result = batch[j]
+            const savedId = insertedResults[j]?.id
+            if (!savedId || result.fields.length === 0) continue
+
+            for (const field of result.fields) {
               const mappingId = fieldMappingIdMap.get(field.fieldNameA)
-              if (!mappingId) return null
-
-              return {
-                resultId: savedResult.id,
+              if (!mappingId) continue
+              allFieldDetails.push({
+                resultId: savedId,
                 fieldMappingId: mappingId,
                 valueA: field.valueA,
                 valueB: field.valueB,
                 numericDiff: field.matcherResult.numericDiff?.toString() ?? null,
                 isMatch: field.isMatch,
                 matcherOutput: field.matcherResult
-              }
-            })
-            .filter(Boolean) as any[]
+              })
+            }
+          }
 
-          if (fieldDetailValues.length > 0) {
-            await db
-              .insert(resultFieldDetailsTable)
-              .values(fieldDetailValues)
+          if (allFieldDetails.length > 0) {
+            // Insert field details in sub-batches too
+            for (let k = 0; k < allFieldDetails.length; k += BATCH_SIZE) {
+              await db
+                .insert(resultFieldDetailsTable)
+                .values(allFieldDetails.slice(k, k + BATCH_SIZE) as any[])
+            }
           }
         }
       }
 
-      // Update run status to completed with summary
-      const [updatedRun] = await db
-        .update(reconciliationRunsTable)
-        .set({
-          status: "completed",
-          summary: output.summary,
-          completedAt: new Date()
-        })
-        .where(eq(reconciliationRunsTable.id, run.id))
-        .returning()
+      const totalRows = Math.max(parsedA.totalRows, parsedB.totalRows)
+      const useChunked = totalRows > CHUNKED_THRESHOLD
 
-      return { status: "success", data: updatedRun }
+      if (useChunked) {
+        // ── Chunked processing for large files ─────────────────────────
+        const chunkSize = recommendChunkSize(
+          totalRows,
+          parsedA.headers.length
+        )
+
+        const chunkedConfig: ChunkedReconConfig = {
+          keyFields,
+          fieldMappings: fieldMappingsConfig,
+          explanationKeys: explanationKeyRules,
+          chunkSize
+        }
+
+        const onChunkComplete = async (chunk: ChunkResult) => {
+          await persistResultsBatch(chunk.results as any[])
+        }
+
+        const summary = await runChunkedReconciliation(
+          parsedA,
+          parsedB,
+          chunkedConfig,
+          onChunkComplete
+        )
+
+        const [updatedRun] = await db
+          .update(reconciliationRunsTable)
+          .set({
+            status: "completed",
+            summary: {
+              ...summary,
+              mode: "chunked",
+              chunkSize
+            },
+            completedAt: new Date()
+          })
+          .where(eq(reconciliationRunsTable.id, run.id))
+          .returning()
+
+        return { status: "success", data: updatedRun }
+      } else {
+        // ── In-memory processing for smaller files ─────────────────────
+        const config: ReconConfig = {
+          keyFields,
+          fieldMappings: fieldMappingsConfig,
+          explanationKeys: explanationKeyRules
+        }
+
+        const output = runReconciliation(parsedA, parsedB, config)
+
+        await persistResultsBatch(output.results as any[])
+
+        const [updatedRun] = await db
+          .update(reconciliationRunsTable)
+          .set({
+            status: "completed",
+            summary: { ...output.summary, mode: "in-memory" },
+            completedAt: new Date()
+          })
+          .where(eq(reconciliationRunsTable.id, run.id))
+          .returning()
+
+        return { status: "success", data: updatedRun }
+      }
     } catch (innerError: any) {
       // Update run status to failed
       await db

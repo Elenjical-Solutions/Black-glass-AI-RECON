@@ -9,6 +9,7 @@ import type { ReconciliationProject } from "@/db/schema/projects-schema"
 const tabs = [
   { label: "Overview", segment: "" },
   { label: "Files", segment: "/files" },
+  { label: "Folders", segment: "/folders" },
   { label: "Definitions", segment: "/definitions" },
   { label: "Dependencies", segment: "/dependencies" },
   { label: "Explanation Keys", segment: "/explanation-keys" },
