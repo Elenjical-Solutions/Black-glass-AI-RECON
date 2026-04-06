@@ -52,18 +52,19 @@ export default function SettingsPage() {
       </div>
 
       {/* Clerk User Profile */}
-      <Card className="glass-card p-6">
+      <Card className="glass-card p-6 overflow-hidden">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <Settings className="h-5 w-5 text-primary" />
           Account Management
         </h3>
         <UserProfile
+          routing="path"
+          path="/dashboard/settings"
           appearance={{
             elements: {
               rootBox: "w-full",
-              cardBox: "shadow-none w-full",
-              card: "shadow-none border-0 bg-transparent w-full",
-              navbar: "hidden",
+              cardBox: "shadow-none w-full max-w-none",
+              card: "shadow-none border-0 bg-transparent w-full max-w-none",
               pageScrollBox: "p-0",
               page: "p-0",
             },
