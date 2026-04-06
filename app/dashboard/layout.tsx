@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/utility/theme-toggle"
+import { UserButton } from "@clerk/nextjs"
 import { useState } from "react"
 
 const mainNav = [
@@ -85,7 +86,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </nav>
 
         {/* Footer */}
-        <div className="border-t border-border/50 p-2 space-y-1">
+        <div className="border-t border-border/50 p-2 space-y-2">
+          {/* User profile */}
+          <div className={cn("flex items-center gap-3 px-2 py-1.5", collapsed && "justify-center")}>
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: "h-7 w-7",
+                  userButtonPopoverCard: "bg-card border border-border/50",
+                  userButtonPopoverActionButton: "text-foreground hover:bg-accent",
+                }
+              }}
+            />
+            {!collapsed && (
+              <span className="text-xs font-medium text-muted-foreground truncate">Account</span>
+            )}
+          </div>
+
           <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between px-2")}>
             {!collapsed && (
               <span className="text-[10px] font-medium text-muted-foreground">Theme</span>

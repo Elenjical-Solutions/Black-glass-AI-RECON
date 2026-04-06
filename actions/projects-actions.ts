@@ -5,18 +5,18 @@ import { reconciliationProjectsTable } from "@/db/schema"
 import { ActionState } from "@/types/actions-types"
 import { ReconciliationProject } from "@/db/schema/projects-schema"
 import { eq } from "drizzle-orm"
-
-const DEMO_USER_ID = "demo-user"
+import { getAuthUserId } from "@/lib/auth"
 
 export async function createProjectAction(
   name: string,
   description?: string
 ): Promise<ActionState<ReconciliationProject>> {
   try {
+    const userId = await getAuthUserId()
     const [project] = await db
       .insert(reconciliationProjectsTable)
       .values({
-        userId: DEMO_USER_ID,
+        userId,
         name,
         description: description ?? null
       })
@@ -32,10 +32,11 @@ export async function getProjectsAction(): Promise<
   ActionState<ReconciliationProject[]>
 > {
   try {
+    const userId = await getAuthUserId()
     const projects = await db
       .select()
       .from(reconciliationProjectsTable)
-      .where(eq(reconciliationProjectsTable.userId, DEMO_USER_ID))
+      .where(eq(reconciliationProjectsTable.userId, userId))
 
     return { status: "success", data: projects }
   } catch (error: any) {

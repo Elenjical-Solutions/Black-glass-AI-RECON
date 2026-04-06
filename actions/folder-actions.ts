@@ -19,8 +19,7 @@ import {
 } from "@/lib/recon/folder-scanner"
 import { parseFile, detectFormat } from "@/lib/recon/parsers"
 import { suggestFieldMappings } from "@/lib/ai/field-mapping-suggest"
-
-const DEMO_USER_ID = "demo-user"
+import { getAuthUserId } from "@/lib/auth"
 
 // ---------------------------------------------------------------------------
 // Scan a folder
@@ -152,6 +151,7 @@ export async function importFromFoldersAction(
   } = {}
 ): Promise<ActionState<ImportFoldersResponse>> {
   try {
+    const userId = await getAuthUserId()
     const {
       recursive = true,
       autoCreateDefinitions = true,
@@ -201,7 +201,7 @@ export async function importFromFoldersAction(
         .insert(uploadedFilesTable)
         .values({
           projectId,
-          uploaderId: DEMO_USER_ID,
+          uploaderId: userId,
           filename: pair.fileA.filename,
           mimeType: formatA === "csv" ? "text/csv" : "application/xml",
           size: pair.fileA.size,
@@ -217,7 +217,7 @@ export async function importFromFoldersAction(
         .insert(uploadedFilesTable)
         .values({
           projectId,
-          uploaderId: DEMO_USER_ID,
+          uploaderId: userId,
           filename: pair.fileB.filename,
           mimeType: formatB === "csv" ? "text/csv" : "application/xml",
           size: pair.fileB.size,

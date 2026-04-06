@@ -6,13 +6,13 @@ import { ActionState } from "@/types/actions-types"
 import { UploadedFile } from "@/db/schema/uploaded-files-schema"
 import { eq } from "drizzle-orm"
 import { parseFile, detectFormat } from "@/lib/recon/parsers"
-
-const DEMO_USER_ID = "demo-user"
+import { getAuthUserId } from "@/lib/auth"
 
 export async function uploadFileAction(
   formData: FormData
 ): Promise<ActionState<UploadedFile>> {
   try {
+    const userId = await getAuthUserId()
     const file = formData.get("file") as File | null
     const projectId = formData.get("projectId") as string | null
     const fileRole = (formData.get("fileRole") as string) || "source_a"
@@ -33,7 +33,7 @@ export async function uploadFileAction(
       .insert(uploadedFilesTable)
       .values({
         projectId,
-        uploaderId: DEMO_USER_ID,
+        uploaderId: userId,
         filename: file.name,
         mimeType: file.type || "text/csv",
         size: file.size,
