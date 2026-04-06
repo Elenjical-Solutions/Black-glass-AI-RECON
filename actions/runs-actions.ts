@@ -12,7 +12,7 @@ import {
 } from "@/db/schema"
 import { ActionState } from "@/types/actions-types"
 import { ReconciliationRun } from "@/db/schema/runs-schema"
-import { eq } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import { runReconciliation, ReconConfig } from "@/lib/recon/engine"
 import { parseFile, detectFormat } from "@/lib/recon/parsers"
 import {
@@ -317,6 +317,155 @@ export async function getRunByIdAction(
     }
 
     return { status: "success", data: run }
+  } catch (error: any) {
+    return { status: "error", message: error.message }
+  }
+}
+
+/**
+ * Get a run with full context: definition name, category, department,
+ * source file names, and field mapping names (instead of just IDs).
+ */
+export async function getRunWithContextAction(
+  runId: string
+): Promise<ActionState<{
+  run: ReconciliationRun
+  definition: {
+    id: string; name: string; description: string | null;
+    category: string | null; department: string | null;
+  }
+  fileA: { id: string; filename: string; rowCount: number | null } | null
+  fileB: { id: string; filename: string; rowCount: number | null } | null
+  fieldMappingNames: Record<string, string> // mappingId -> fieldNameA
+}>> {
+  try {
+    const [run] = await db
+      .select()
+      .from(reconciliationRunsTable)
+      .where(eq(reconciliationRunsTable.id, runId))
+
+    if (!run) {
+      return { status: "error", message: "Run not found" }
+    }
+
+    const [definition] = await db
+      .select()
+      .from(reconciliationDefinitionsTable)
+      .where(eq(reconciliationDefinitionsTable.id, run.definitionId))
+
+    if (!definition) {
+      return { status: "error", message: "Definition not found" }
+    }
+
+    let fileA = null
+    let fileB = null
+
+    if (definition.sourceAFileId) {
+      const [f] = await db.select({
+        id: uploadedFilesTable.id,
+        filename: uploadedFilesTable.filename,
+        rowCount: uploadedFilesTable.rowCount,
+      }).from(uploadedFilesTable).where(eq(uploadedFilesTable.id, definition.sourceAFileId))
+      fileA = f ?? null
+    }
+
+    if (definition.sourceBFileId) {
+      const [f] = await db.select({
+        id: uploadedFilesTable.id,
+        filename: uploadedFilesTable.filename,
+        rowCount: uploadedFilesTable.rowCount,
+      }).from(uploadedFilesTable).where(eq(uploadedFilesTable.id, definition.sourceBFileId))
+      fileB = f ?? null
+    }
+
+    // Get field mapping names so we can display them instead of IDs in results
+    const mappings = await db
+      .select({ id: fieldMappingsTable.id, fieldNameA: fieldMappingsTable.fieldNameA })
+      .from(fieldMappingsTable)
+      .where(eq(fieldMappingsTable.definitionId, definition.id))
+
+    const fieldMappingNames: Record<string, string> = {}
+    for (const m of mappings) {
+      fieldMappingNames[m.id] = m.fieldNameA
+    }
+
+    return {
+      status: "success",
+      data: {
+        run,
+        definition: {
+          id: definition.id,
+          name: definition.name,
+          description: definition.description,
+          category: (definition as any).category ?? null,
+          department: (definition as any).department ?? null,
+        },
+        fileA,
+        fileB,
+        fieldMappingNames,
+      }
+    }
+  } catch (error: any) {
+    return { status: "error", message: error.message }
+  }
+}
+
+/**
+ * Get runs for a cycle with definition context (name, category, department, file names).
+ */
+export async function getRunsWithContextForCycleAction(
+  cycleId: string
+): Promise<ActionState<Array<ReconciliationRun & {
+  definitionName: string; category: string | null; department: string | null;
+  fileAName: string | null; fileBName: string | null;
+}>>> {
+  try {
+    const runs = await db
+      .select()
+      .from(reconciliationRunsTable)
+      .where(eq(reconciliationRunsTable.cycleId, cycleId))
+
+    // Load all definitions referenced by these runs
+    const defIds = [...new Set(runs.map(r => r.definitionId))]
+    const definitions = defIds.length > 0
+      ? await db.select().from(reconciliationDefinitionsTable).where(
+          inArray(reconciliationDefinitionsTable.id, defIds)
+        )
+      : []
+
+    // Load all files referenced by definitions
+    const fileIds = definitions.flatMap(d => [d.sourceAFileId, d.sourceBFileId]).filter(Boolean) as string[]
+    const files = fileIds.length > 0
+      ? await db.select({ id: uploadedFilesTable.id, filename: uploadedFilesTable.filename })
+          .from(uploadedFilesTable)
+          .where(inArray(uploadedFilesTable.id, fileIds))
+      : []
+
+    const defMap = new Map(definitions.map(d => [d.id, d]))
+    const fileMap = new Map(files.map(f => [f.id, f.filename]))
+
+    const enriched = runs.map((run, index) => {
+      const def = defMap.get(run.definitionId)
+      return {
+        ...run,
+        definitionName: def?.name ?? "Unknown Definition",
+        category: (def as any)?.category ?? null,
+        department: (def as any)?.department ?? null,
+        fileAName: def?.sourceAFileId ? (fileMap.get(def.sourceAFileId) ?? null) : null,
+        fileBName: def?.sourceBFileId ? (fileMap.get(def.sourceBFileId) ?? null) : null,
+      }
+    })
+
+    // Sort: core first, then sensitivity, then downstream
+    const catOrder: Record<string, number> = { core: 0, sensitivity: 1, downstream: 2 }
+    enriched.sort((a, b) => {
+      const aOrder = catOrder[a.category ?? "downstream"] ?? 2
+      const bOrder = catOrder[b.category ?? "downstream"] ?? 2
+      if (aOrder !== bOrder) return aOrder - bOrder
+      return a.definitionName.localeCompare(b.definitionName)
+    })
+
+    return { status: "success", data: enriched }
   } catch (error: any) {
     return { status: "error", message: error.message }
   }

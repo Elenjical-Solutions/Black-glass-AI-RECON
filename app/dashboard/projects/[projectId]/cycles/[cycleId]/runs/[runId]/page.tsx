@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, use } from "react"
-import { getRunByIdAction } from "@/actions/runs-actions"
+import { getRunByIdAction, getRunWithContextAction } from "@/actions/runs-actions"
 import {
   getResultsAction,
   getResultDetailsAction,
@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/sheet"
 import {
   ArrowLeft,
+  ArrowRight,
   Check,
   X,
   ChevronDown,
@@ -48,6 +49,7 @@ import {
   Loader2,
   Search,
   FileText,
+  FileSpreadsheet,
   Tag
 } from "lucide-react"
 import { toast } from "sonner"
@@ -97,6 +99,12 @@ export default function RunResultsPage({
   const { projectId, cycleId, runId } = use(params)
 
   const [run, setRun] = useState<ReconciliationRun | null>(null)
+  const [context, setContext] = useState<{
+    definition: { id: string; name: string; description: string | null; category: string | null; department: string | null }
+    fileA: { id: string; filename: string; rowCount: number | null } | null
+    fileB: { id: string; filename: string; rowCount: number | null } | null
+    fieldMappingNames: Record<string, string>
+  } | null>(null)
   const [results, setResults] = useState<
     (ReconciliationResult & { explanationKey?: ExplanationKey | null })[]
   >([])
@@ -129,8 +137,19 @@ export default function RunResultsPage({
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false)
 
   const loadRun = useCallback(async () => {
-    const result = await getRunByIdAction(runId)
-    if (result.status === "success") setRun(result.data)
+    const [runResult, ctxResult] = await Promise.all([
+      getRunByIdAction(runId),
+      getRunWithContextAction(runId)
+    ])
+    if (runResult.status === "success") setRun(runResult.data)
+    if (ctxResult.status === "success") {
+      setContext({
+        definition: ctxResult.data.definition,
+        fileA: ctxResult.data.fileA,
+        fileB: ctxResult.data.fileB,
+        fieldMappingNames: ctxResult.data.fieldMappingNames,
+      })
+    }
   }, [runId])
 
   const loadKeys = useCallback(async () => {
@@ -337,6 +356,58 @@ export default function RunResultsPage({
         <ArrowLeft className="h-4 w-4" />
         Back to Cycle
       </Link>
+
+      {/* Recon Context Header */}
+      {context && (
+        <Card className="glass-card p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold">{context.definition.name}</h2>
+                {context.definition.category === "core" && (
+                  <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30 text-[10px]">Core</Badge>
+                )}
+                {context.definition.category === "sensitivity" && (
+                  <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30 text-[10px]">Sensitivity</Badge>
+                )}
+                {context.definition.category === "downstream" && (
+                  <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px]">Downstream</Badge>
+                )}
+                {context.definition.department && (
+                  <Badge variant="outline" className="text-[10px]">{context.definition.department}</Badge>
+                )}
+              </div>
+              {context.definition.description && (
+                <p className="text-xs text-muted-foreground mt-1 max-w-2xl">{context.definition.description}</p>
+              )}
+            </div>
+          </div>
+          {/* Files compared */}
+          <div className="mt-3 flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="h-4 w-4 text-blue-400" />
+              <div>
+                <span className="text-xs text-muted-foreground">Source A: </span>
+                <span className="text-xs font-medium">{context.fileA?.filename ?? "—"}</span>
+                {context.fileA?.rowCount && (
+                  <span className="text-[10px] text-muted-foreground ml-1">({context.fileA.rowCount.toLocaleString()} rows)</span>
+                )}
+              </div>
+            </div>
+            <ArrowRight className="h-3.5 w-3.5 text-primary/50" />
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="h-4 w-4 text-cyan-400" />
+              <div>
+                <span className="text-xs text-muted-foreground">Source B: </span>
+                <span className="text-xs font-medium">{context.fileB?.filename ?? "—"}</span>
+                {context.fileB?.rowCount && (
+                  <span className="text-[10px] text-muted-foreground ml-1">({context.fileB.rowCount.toLocaleString()} rows)</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Summary Cards */}
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
@@ -734,7 +805,7 @@ export default function RunResultsPage({
                                   (fd) => (
                                     <TableRow key={fd.id}>
                                       <TableCell className="font-mono text-xs">
-                                        {fd.fieldMappingId.substring(0, 8)}...
+                                        {context?.fieldMappingNames[fd.fieldMappingId] ?? fd.fieldMappingId.substring(0, 8)}
                                       </TableCell>
                                       <TableCell className="text-sm">
                                         {fd.valueA ?? "-"}

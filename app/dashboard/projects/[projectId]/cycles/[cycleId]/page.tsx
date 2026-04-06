@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, use } from "react"
 import Link from "next/link"
 import { getCycleByIdAction, updateCycleStatusAction } from "@/actions/cycles-actions"
-import { getRunsForCycleAction, triggerRunAction } from "@/actions/runs-actions"
+import { getRunsWithContextForCycleAction, triggerRunAction } from "@/actions/runs-actions"
 import { getDefinitionsForProjectAction } from "@/actions/definitions-actions"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -20,47 +20,54 @@ import {
 import {
   ArrowLeft,
   Play,
-  GitBranch,
   Loader2,
   ArrowRight,
   CheckCircle2,
   XCircle,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  FileSpreadsheet,
+  GitBranch
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
 import type { RegressionCycle } from "@/db/schema/cycles-schema"
 import type { ReconciliationRun } from "@/db/schema/runs-schema"
-import type { ReconciliationDefinition } from "@/db/schema/definitions-schema"
 
 function statusBadgeClass(status: string) {
   switch (status) {
-    case "completed":
-      return "bg-green-500/20 text-green-400 border-green-500/30"
-    case "running":
-    case "pending":
-      return "bg-blue-500/20 text-blue-400 border-blue-500/30"
-    case "failed":
-      return "bg-red-500/20 text-red-400 border-red-500/30"
-    default:
-      return "bg-muted text-muted-foreground border-border"
+    case "completed": return "bg-green-500/20 text-green-400 border-green-500/30"
+    case "running": case "pending": return "bg-blue-500/20 text-blue-400 border-blue-500/30"
+    case "failed": return "bg-red-500/20 text-red-400 border-red-500/30"
+    default: return "bg-muted text-muted-foreground border-border"
   }
 }
 
 function statusIcon(status: string) {
   switch (status) {
-    case "completed":
-      return <CheckCircle2 className="h-4 w-4 text-green-400" />
-    case "running":
-    case "pending":
-      return <Clock className="h-4 w-4 text-blue-400" />
-    case "failed":
-      return <XCircle className="h-4 w-4 text-red-400" />
-    default:
-      return <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+    case "completed": return <CheckCircle2 className="h-4 w-4 text-green-400" />
+    case "running": case "pending": case "processing": return <Clock className="h-4 w-4 text-blue-400" />
+    case "failed": return <XCircle className="h-4 w-4 text-red-400" />
+    default: return <AlertTriangle className="h-4 w-4 text-muted-foreground" />
   }
+}
+
+function categoryBadge(category: string | null) {
+  switch (category) {
+    case "core": return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30 text-[10px]">Core</Badge>
+    case "sensitivity": return <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30 text-[10px]">Sensitivity</Badge>
+    case "downstream": return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px]">Downstream</Badge>
+    default: return null
+  }
+}
+
+type EnrichedRun = ReconciliationRun & {
+  definitionName: string
+  category: string | null
+  department: string | null
+  fileAName: string | null
+  fileBName: string | null
 }
 
 export default function CycleDetailPage({
@@ -70,84 +77,52 @@ export default function CycleDetailPage({
 }) {
   const { projectId, cycleId } = use(params)
   const [cycle, setCycle] = useState<RegressionCycle | null>(null)
-  const [runs, setRuns] = useState<ReconciliationRun[]>([])
-  const [definitions, setDefinitions] = useState<ReconciliationDefinition[]>([])
+  const [runs, setRuns] = useState<EnrichedRun[]>([])
+  const [definitions, setDefinitions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [runningAll, setRunningAll] = useState(false)
 
   const loadData = useCallback(async () => {
     const [cycleResult, runsResult, defsResult] = await Promise.all([
       getCycleByIdAction(cycleId),
-      getRunsForCycleAction(cycleId),
+      getRunsWithContextForCycleAction(cycleId),
       getDefinitionsForProjectAction(projectId)
     ])
-
     if (cycleResult.status === "success") setCycle(cycleResult.data)
-    if (runsResult.status === "success") setRuns(runsResult.data)
+    if (runsResult.status === "success") setRuns(runsResult.data as EnrichedRun[])
     if (defsResult.status === "success") setDefinitions(defsResult.data)
     setLoading(false)
   }, [cycleId, projectId])
 
-  useEffect(() => {
-    loadData()
-  }, [loadData])
-
-  const defNameMap = new Map(definitions.map(d => [d.id, d.name]))
+  useEffect(() => { loadData() }, [loadData])
 
   async function handleRunAll() {
-    if (definitions.length === 0) {
-      toast.error("No definitions to run")
-      return
-    }
-
+    if (definitions.length === 0) { toast.error("No definitions to run"); return }
     setRunningAll(true)
     toast.info(`Running ${definitions.length} definitions...`)
-
     try {
-      // Update cycle status to running
       await updateCycleStatusAction(cycleId, "running")
-
-      let successCount = 0
-      let failCount = 0
-
+      let successCount = 0, failCount = 0
       for (const def of definitions) {
         const result = await triggerRunAction(cycleId, def.id)
-        if (result.status === "success") {
-          successCount++
-        } else {
-          failCount++
-        }
+        if (result.status === "success") successCount++
+        else failCount++
       }
-
-      // Update cycle status to completed
       await updateCycleStatusAction(cycleId, "completed")
-
-      if (failCount === 0) {
-        toast.success(`All ${successCount} runs completed successfully`)
-      } else {
-        toast.error(
-          `${successCount} succeeded, ${failCount} failed`
-        )
-      }
-
+      if (failCount === 0) toast.success(`All ${successCount} runs completed`)
+      else toast.error(`${successCount} succeeded, ${failCount} failed`)
       loadData()
     } catch {
       toast.error("Failed to run definitions")
       await updateCycleStatusAction(cycleId, "failed")
-    } finally {
-      setRunningAll(false)
-    }
+    } finally { setRunningAll(false) }
   }
 
   async function handleRunSingle(definitionId: string) {
     toast.info("Running reconciliation...")
     const result = await triggerRunAction(cycleId, definitionId)
-    if (result.status === "success") {
-      toast.success("Run completed")
-      loadData()
-    } else {
-      toast.error(result.message)
-    }
+    if (result.status === "success") { toast.success("Run completed"); loadData() }
+    else toast.error(result.message)
   }
 
   function getSummaryStats(run: ReconciliationRun) {
@@ -157,8 +132,6 @@ export default function CycleDetailPage({
       matched: summary.matched ?? 0,
       breaks: summary.breaks ?? 0,
       explained: summary.explained ?? 0,
-      missingA: summary.missingA ?? summary.missing_a ?? 0,
-      missingB: summary.missingB ?? summary.missing_b ?? 0,
       total: summary.totalRows ?? summary.total ?? 0
     }
   }
@@ -174,12 +147,18 @@ export default function CycleDetailPage({
   }
 
   if (!cycle) {
-    return (
-      <div className="p-6 lg:p-8">
-        <p className="text-muted-foreground">Cycle not found.</p>
-      </div>
-    )
+    return <div className="p-6 lg:p-8"><p className="text-muted-foreground">Cycle not found.</p></div>
   }
+
+  // Group runs by category for display
+  const coreRuns = runs.filter(r => r.category === "core")
+  const sensiRuns = runs.filter(r => r.category === "sensitivity")
+  const downstreamRuns = runs.filter(r => r.category === "downstream")
+
+  // Overall stats
+  const totalMatched = runs.reduce((s, r) => s + (getSummaryStats(r)?.matched ?? 0), 0)
+  const totalBreaks = runs.reduce((s, r) => s + (getSummaryStats(r)?.breaks ?? 0), 0)
+  const totalExplained = runs.reduce((s, r) => s + (getSummaryStats(r)?.explained ?? 0), 0)
 
   return (
     <div className="p-6 lg:p-8 space-y-6">
@@ -191,149 +170,189 @@ export default function CycleDetailPage({
         Back to Cycles
       </Link>
 
-      {/* Cycle Info */}
+      {/* Cycle Header */}
       <Card className="glass-card p-6">
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3">
               <h2 className="text-xl font-semibold">{cycle.name}</h2>
-              <Badge className={cn(statusBadgeClass(cycle.status))}>
-                {cycle.status}
-              </Badge>
+              <Badge className={cn(statusBadgeClass(cycle.status))}>{cycle.status}</Badge>
             </div>
             <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground">
-              {cycle.startedAt && (
-                <span>
-                  Started{" "}
-                  {format(new Date(cycle.startedAt), "MMM d, yyyy HH:mm")}
-                </span>
-              )}
-              {cycle.completedAt && (
-                <span>
-                  Completed{" "}
-                  {format(new Date(cycle.completedAt), "MMM d, yyyy HH:mm")}
-                </span>
-              )}
+              {cycle.startedAt && <span>Started {format(new Date(cycle.startedAt), "MMM d, yyyy HH:mm")}</span>}
+              {cycle.completedAt && <span>Completed {format(new Date(cycle.completedAt), "MMM d, yyyy HH:mm")}</span>}
             </div>
+            {/* Aggregate stats */}
+            {runs.length > 0 && (
+              <div className="mt-3 flex items-center gap-4 text-sm">
+                <span className="text-muted-foreground">{runs.length} recons</span>
+                <span className="text-green-400 font-medium">{totalMatched.toLocaleString()} matched</span>
+                <span className="text-red-400 font-medium">{totalBreaks.toLocaleString()} breaks</span>
+                <span className="text-amber-400 font-medium">{totalExplained.toLocaleString()} explained</span>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              className="gap-2"
-              onClick={handleRunAll}
-              disabled={runningAll}
-            >
-              {runningAll ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              Run All Definitions
-            </Button>
-          </div>
+          <Button className="gap-2" onClick={handleRunAll} disabled={runningAll}>
+            {runningAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            Run All Definitions
+          </Button>
         </div>
       </Card>
 
-      {/* Runs Table */}
-      <Card className="glass-card overflow-hidden">
-        <div className="p-4 border-b border-border/50">
-          <h3 className="text-lg font-semibold">
-            Runs ({runs.length})
-          </h3>
-        </div>
-
-        {runs.length === 0 ? (
-          <div className="p-12 text-center">
-            <p className="text-sm text-muted-foreground">
-              No runs yet. Click &quot;Run All Definitions&quot; to start
-              reconciliation.
-            </p>
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Definition</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-center">Matched</TableHead>
-                <TableHead className="text-center">Breaks</TableHead>
-                <TableHead className="text-center">Explained</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {runs.map(run => {
-                const stats = getSummaryStats(run)
-                return (
-                  <TableRow key={run.id}>
-                    <TableCell className="font-medium">
-                      {defNameMap.get(run.definitionId) ?? "Unknown"}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {statusIcon(run.status)}
-                        <span className="capitalize">{run.status}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {stats ? (
-                        <span className="text-green-400 font-medium">
-                          {stats.matched}
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {stats ? (
-                        <span className="text-red-400 font-medium">
-                          {stats.breaks}
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {stats ? (
-                        <span className="text-amber-400 font-medium">
-                          {stats.explained}
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {run.startedAt
-                        ? format(new Date(run.startedAt), "HH:mm:ss")
-                        : "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRunSingle(run.definitionId)}
-                        >
-                          <Play className="h-4 w-4" />
-                        </Button>
-                        {run.status === "completed" && (
-                          <Link
-                            href={`/dashboard/projects/${projectId}/cycles/${cycleId}/runs/${run.id}`}
-                          >
-                            <Button variant="ghost" size="sm">
-                              <ArrowRight className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+      {/* Runs by Section */}
+      {runs.length === 0 ? (
+        <Card className="glass-card p-12 text-center">
+          <p className="text-sm text-muted-foreground">No runs yet. Click &quot;Run All Definitions&quot; to start.</p>
+        </Card>
+      ) : (
+        <>
+          {coreRuns.length > 0 && (
+            <RunSection
+              title="Core Reconciliation"
+              badge={<Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Core</Badge>}
+              runs={coreRuns}
+              projectId={projectId}
+              cycleId={cycleId}
+              onRunSingle={handleRunSingle}
+              getSummaryStats={getSummaryStats}
+            />
+          )}
+          {sensiRuns.length > 0 && (
+            <RunSection
+              title="Sensitivity Reconciliations"
+              badge={<Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">Sensitivity</Badge>}
+              runs={sensiRuns}
+              projectId={projectId}
+              cycleId={cycleId}
+              onRunSingle={handleRunSingle}
+              getSummaryStats={getSummaryStats}
+            />
+          )}
+          {downstreamRuns.length > 0 && (
+            <RunSection
+              title="Downstream Reports"
+              badge={<Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">Downstream</Badge>}
+              runs={downstreamRuns}
+              projectId={projectId}
+              cycleId={cycleId}
+              onRunSingle={handleRunSingle}
+              getSummaryStats={getSummaryStats}
+            />
+          )}
+        </>
+      )}
     </div>
+  )
+}
+
+function RunSection({
+  title,
+  badge,
+  runs,
+  projectId,
+  cycleId,
+  onRunSingle,
+  getSummaryStats,
+}: {
+  title: string
+  badge: React.ReactNode
+  runs: EnrichedRun[]
+  projectId: string
+  cycleId: string
+  onRunSingle: (defId: string) => void
+  getSummaryStats: (run: ReconciliationRun) => { matched: number; breaks: number; explained: number; total: number } | null
+}) {
+  return (
+    <Card className="glass-card overflow-hidden">
+      <div className="p-4 border-b border-border/50 flex items-center gap-3">
+        {badge}
+        <h3 className="text-lg font-semibold">{title}</h3>
+        <span className="text-sm text-muted-foreground ml-auto">{runs.length} recon(s)</span>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-10">#</TableHead>
+            <TableHead>Reconciliation</TableHead>
+            <TableHead>Files Compared</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-center">Matched</TableHead>
+            <TableHead className="text-center">Breaks</TableHead>
+            <TableHead className="text-center">Explained</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {runs.map((run, index) => {
+            const stats = getSummaryStats(run)
+            const explainedPct = stats && stats.breaks > 0 ? Math.round((stats.explained / stats.breaks) * 100) : 0
+            return (
+              <TableRow key={run.id}>
+                <TableCell className="text-muted-foreground font-mono text-xs">
+                  {index + 1}
+                </TableCell>
+                <TableCell>
+                  <div>
+                    <div className="font-medium text-sm">{run.definitionName}</div>
+                    {run.department && (
+                      <span className="text-[10px] text-muted-foreground">{run.department}</span>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <FileSpreadsheet className="h-3 w-3 shrink-0" />
+                    <span className="truncate max-w-[120px]" title={run.fileAName ?? ""}>
+                      {run.fileAName ?? "—"}
+                    </span>
+                    <ArrowRight className="h-3 w-3 shrink-0 text-primary/50" />
+                    <span className="truncate max-w-[120px]" title={run.fileBName ?? ""}>
+                      {run.fileBName ?? "—"}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    {statusIcon(run.status)}
+                    <span className="capitalize text-sm">{run.status}</span>
+                  </div>
+                </TableCell>
+                <TableCell className="text-center">
+                  {stats ? <span className="text-green-400 font-medium">{stats.matched.toLocaleString()}</span> : "—"}
+                </TableCell>
+                <TableCell className="text-center">
+                  {stats ? <span className="text-red-400 font-medium">{stats.breaks.toLocaleString()}</span> : "—"}
+                </TableCell>
+                <TableCell className="text-center">
+                  {stats && stats.breaks > 0 ? (
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span className="text-amber-400 font-medium">{stats.explained}</span>
+                      <div className="w-12 h-1.5 rounded-full bg-red-500/20 overflow-hidden">
+                        <div className="h-full rounded-full bg-amber-400" style={{ width: `${explainedPct}%` }} />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{explainedPct}%</span>
+                    </div>
+                  ) : stats ? "—" : "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => onRunSingle(run.definitionId)} title="Re-run">
+                      <Play className="h-3.5 w-3.5" />
+                    </Button>
+                    {run.status === "completed" && (
+                      <Link href={`/dashboard/projects/${projectId}/cycles/${cycleId}/runs/${run.id}`}>
+                        <Button variant="ghost" size="sm" title="View Results">
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </Button>
+                      </Link>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
