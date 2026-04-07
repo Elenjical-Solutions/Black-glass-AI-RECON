@@ -25,17 +25,45 @@ import {
 /** Threshold above which we switch from in-memory to chunked processing */
 const CHUNKED_THRESHOLD = 10_000
 
+/**
+ * Trigger a reconciliation run.
+ * - definitionId: the recon template (field mappings, matchers, tolerances)
+ * - sourceAFileId/sourceBFileId: the files to compare (per-run, not per-definition)
+ *   If not provided, falls back to the definition's default files (legacy support).
+ */
 export async function triggerRunAction(
   cycleId: string,
-  definitionId: string
+  definitionId: string,
+  sourceAFileId?: string,
+  sourceBFileId?: string
 ): Promise<ActionState<ReconciliationRun>> {
   try {
-    // Create run record with status "pending"
+    // Load definition first to resolve file IDs if not explicitly provided
+    const [definition] = await db
+      .select()
+      .from(reconciliationDefinitionsTable)
+      .where(eq(reconciliationDefinitionsTable.id, definitionId))
+
+    if (!definition) {
+      return { status: "error", message: "Definition not found" }
+    }
+
+    // Resolve file IDs: explicit args > definition defaults
+    const resolvedFileA = sourceAFileId ?? definition.sourceAFileId
+    const resolvedFileB = sourceBFileId ?? definition.sourceBFileId
+
+    if (!resolvedFileA || !resolvedFileB) {
+      return { status: "error", message: "Both source A and source B files are required. Select files when running, or set defaults on the definition." }
+    }
+
+    // Create run record with file IDs stored on the run
     const [run] = await db
       .insert(reconciliationRunsTable)
       .values({
         cycleId,
         definitionId,
+        sourceAFileId: resolvedFileA,
+        sourceBFileId: resolvedFileB,
         status: "pending",
         startedAt: new Date()
       })
@@ -48,30 +76,24 @@ export async function triggerRunAction(
         .set({ status: "processing" })
         .where(eq(reconciliationRunsTable.id, run.id))
 
-      // Load definition
-      const [definition] = await db
-        .select()
-        .from(reconciliationDefinitionsTable)
-        .where(eq(reconciliationDefinitionsTable.id, definitionId))
-
-      if (!definition) {
-        throw new Error("Definition not found")
-      }
-
-      if (!definition.sourceAFileId || !definition.sourceBFileId) {
-        throw new Error("Definition must have both source A and source B files")
-      }
-
-      // Load file contents
+      // Load file contents (only filename + content needed)
       const [fileA] = await db
-        .select()
+        .select({
+          id: uploadedFilesTable.id,
+          filename: uploadedFilesTable.filename,
+          fileContent: uploadedFilesTable.fileContent,
+        })
         .from(uploadedFilesTable)
-        .where(eq(uploadedFilesTable.id, definition.sourceAFileId))
+        .where(eq(uploadedFilesTable.id, resolvedFileA))
 
       const [fileB] = await db
-        .select()
+        .select({
+          id: uploadedFilesTable.id,
+          filename: uploadedFilesTable.filename,
+          fileContent: uploadedFilesTable.fileContent,
+        })
         .from(uploadedFilesTable)
-        .where(eq(uploadedFilesTable.id, definition.sourceBFileId))
+        .where(eq(uploadedFilesTable.id, resolvedFileB))
 
       if (!fileA?.fileContent || !fileB?.fileContent) {
         throw new Error("File contents not available")
@@ -360,21 +382,25 @@ export async function getRunWithContextAction(
     let fileA = null
     let fileB = null
 
-    if (definition.sourceAFileId) {
+    // Read files from the run (per-run file binding), fall back to definition for legacy runs
+    const fileAId = run.sourceAFileId ?? definition.sourceAFileId
+    const fileBId = run.sourceBFileId ?? definition.sourceBFileId
+
+    if (fileAId) {
       const [f] = await db.select({
         id: uploadedFilesTable.id,
         filename: uploadedFilesTable.filename,
         rowCount: uploadedFilesTable.rowCount,
-      }).from(uploadedFilesTable).where(eq(uploadedFilesTable.id, definition.sourceAFileId))
+      }).from(uploadedFilesTable).where(eq(uploadedFilesTable.id, fileAId))
       fileA = f ?? null
     }
 
-    if (definition.sourceBFileId) {
+    if (fileBId) {
       const [f] = await db.select({
         id: uploadedFilesTable.id,
         filename: uploadedFilesTable.filename,
         rowCount: uploadedFilesTable.rowCount,
-      }).from(uploadedFilesTable).where(eq(uploadedFilesTable.id, definition.sourceBFileId))
+      }).from(uploadedFilesTable).where(eq(uploadedFilesTable.id, fileBId))
       fileB = f ?? null
     }
 
@@ -433,26 +459,34 @@ export async function getRunsWithContextForCycleAction(
         )
       : []
 
-    // Load all files referenced by definitions
-    const fileIds = definitions.flatMap(d => [d.sourceAFileId, d.sourceBFileId]).filter(Boolean) as string[]
-    const files = fileIds.length > 0
+    // Load all files referenced by runs (per-run file binding) or definitions (legacy fallback)
+    const fileIds = [
+      ...runs.map(r => r.sourceAFileId),
+      ...runs.map(r => r.sourceBFileId),
+      ...definitions.flatMap(d => [d.sourceAFileId, d.sourceBFileId])
+    ].filter(Boolean) as string[]
+    const uniqueFileIds = [...new Set(fileIds)]
+    const files = uniqueFileIds.length > 0
       ? await db.select({ id: uploadedFilesTable.id, filename: uploadedFilesTable.filename })
           .from(uploadedFilesTable)
-          .where(inArray(uploadedFilesTable.id, fileIds))
+          .where(inArray(uploadedFilesTable.id, uniqueFileIds))
       : []
 
     const defMap = new Map(definitions.map(d => [d.id, d]))
     const fileMap = new Map(files.map(f => [f.id, f.filename]))
 
-    const enriched = runs.map((run, index) => {
+    const enriched = runs.map((run) => {
       const def = defMap.get(run.definitionId)
+      // Files come from the run (preferred) or the definition (legacy)
+      const fileAId = run.sourceAFileId ?? def?.sourceAFileId
+      const fileBId = run.sourceBFileId ?? def?.sourceBFileId
       return {
         ...run,
         definitionName: def?.name ?? "Unknown Definition",
         category: (def as any)?.category ?? null,
         department: (def as any)?.department ?? null,
-        fileAName: def?.sourceAFileId ? (fileMap.get(def.sourceAFileId) ?? null) : null,
-        fileBName: def?.sourceBFileId ? (fileMap.get(def.sourceBFileId) ?? null) : null,
+        fileAName: fileAId ? (fileMap.get(fileAId) ?? null) : null,
+        fileBName: fileBId ? (fileMap.get(fileBId) ?? null) : null,
       }
     })
 

@@ -5,6 +5,7 @@ import Link from "next/link"
 import { getCycleByIdAction, updateCycleStatusAction } from "@/actions/cycles-actions"
 import { getRunsWithContextForCycleAction, triggerRunAction } from "@/actions/runs-actions"
 import { getDefinitionsForProjectAction } from "@/actions/definitions-actions"
+import { getFilesForProjectAction } from "@/actions/files-actions"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +18,20 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select"
 import {
   ArrowLeft,
   Play,
@@ -79,22 +94,35 @@ export default function CycleDetailPage({
   const [cycle, setCycle] = useState<RegressionCycle | null>(null)
   const [runs, setRuns] = useState<EnrichedRun[]>([])
   const [definitions, setDefinitions] = useState<any[]>([])
+  const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [runningAll, setRunningAll] = useState(false)
 
+  // Run dialog state
+  const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [runDialogDefId, setRunDialogDefId] = useState("")
+  const [runDialogFileA, setRunDialogFileA] = useState("")
+  const [runDialogFileB, setRunDialogFileB] = useState("")
+  const [runDialogSubmitting, setRunDialogSubmitting] = useState(false)
+
   const loadData = useCallback(async () => {
-    const [cycleResult, runsResult, defsResult] = await Promise.all([
+    const [cycleResult, runsResult, defsResult, filesResult] = await Promise.all([
       getCycleByIdAction(cycleId),
       getRunsWithContextForCycleAction(cycleId),
-      getDefinitionsForProjectAction(projectId)
+      getDefinitionsForProjectAction(projectId),
+      getFilesForProjectAction(projectId)
     ])
     if (cycleResult.status === "success") setCycle(cycleResult.data)
     if (runsResult.status === "success") setRuns(runsResult.data as EnrichedRun[])
     if (defsResult.status === "success") setDefinitions(defsResult.data)
+    if (filesResult.status === "success") setFiles(filesResult.data)
     setLoading(false)
   }, [cycleId, projectId])
 
   useEffect(() => { loadData() }, [loadData])
+
+  const sourceAFiles = files.filter((f: any) => f.fileRole === "source_a")
+  const sourceBFiles = files.filter((f: any) => f.fileRole === "source_b")
 
   async function handleRunAll() {
     if (definitions.length === 0) { toast.error("No definitions to run"); return }
@@ -104,7 +132,8 @@ export default function CycleDetailPage({
       await updateCycleStatusAction(cycleId, "running")
       let successCount = 0, failCount = 0
       for (const def of definitions) {
-        const result = await triggerRunAction(cycleId, def.id)
+        // Use definition's default files (legacy fallback)
+        const result = await triggerRunAction(cycleId, def.id, def.sourceAFileId, def.sourceBFileId)
         if (result.status === "success") successCount++
         else failCount++
       }
@@ -118,7 +147,32 @@ export default function CycleDetailPage({
     } finally { setRunningAll(false) }
   }
 
+  function openRunDialog(definitionId?: string) {
+    setRunDialogDefId(definitionId ?? "")
+    setRunDialogFileA("")
+    setRunDialogFileB("")
+    setRunDialogOpen(true)
+  }
+
+  async function handleRunWithFiles() {
+    if (!runDialogDefId || !runDialogFileA || !runDialogFileB) {
+      toast.error("Select a definition and both files")
+      return
+    }
+    setRunDialogSubmitting(true)
+    const result = await triggerRunAction(cycleId, runDialogDefId, runDialogFileA, runDialogFileB)
+    setRunDialogSubmitting(false)
+    if (result.status === "success") {
+      toast.success("Run completed")
+      setRunDialogOpen(false)
+      loadData()
+    } else {
+      toast.error(result.message)
+    }
+  }
+
   async function handleRunSingle(definitionId: string) {
+    // Quick re-run with same default files
     toast.info("Running reconciliation...")
     const result = await triggerRunAction(cycleId, definitionId)
     if (result.status === "success") { toast.success("Run completed"); loadData() }
@@ -192,9 +246,13 @@ export default function CycleDetailPage({
               </div>
             )}
           </div>
+          <Button variant="outline" className="gap-2" onClick={() => openRunDialog()}>
+            <FileSpreadsheet className="h-4 w-4" />
+            Run with Files
+          </Button>
           <Button className="gap-2" onClick={handleRunAll} disabled={runningAll}>
             {runningAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Run All Definitions
+            Run All (Default Files)
           </Button>
         </div>
       </Card>
@@ -241,6 +299,71 @@ export default function CycleDetailPage({
           )}
         </>
       )}
+
+      {/* Run with Files Dialog */}
+      <Dialog open={runDialogOpen} onOpenChange={setRunDialogOpen}>
+        <DialogContent className="sm:max-w-md glass-card">
+          <DialogHeader>
+            <DialogTitle>Run Reconciliation with Files</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Recon Template</label>
+              <Select value={runDialogDefId} onValueChange={(v) => v && setRunDialogDefId(v)}>
+                <SelectTrigger><SelectValue placeholder="Select definition..." /></SelectTrigger>
+                <SelectContent>
+                  {definitions.map((def: any) => (
+                    <SelectItem key={def.id} value={def.id}>
+                      {def.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Source A File</label>
+              <Select value={runDialogFileA} onValueChange={(v) => v && setRunDialogFileA(v)}>
+                <SelectTrigger><SelectValue placeholder="Select source A..." /></SelectTrigger>
+                <SelectContent>
+                  {sourceAFiles.map((f: any) => (
+                    <SelectItem key={f.id} value={f.id}>
+                      <span className="flex items-center gap-2">
+                        <FileSpreadsheet className="h-3 w-3 text-blue-400" />
+                        {f.filename}
+                        <span className="text-[10px] text-muted-foreground">({f.rowCount?.toLocaleString()} rows)</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Source B File</label>
+              <Select value={runDialogFileB} onValueChange={(v) => v && setRunDialogFileB(v)}>
+                <SelectTrigger><SelectValue placeholder="Select source B..." /></SelectTrigger>
+                <SelectContent>
+                  {sourceBFiles.map((f: any) => (
+                    <SelectItem key={f.id} value={f.id}>
+                      <span className="flex items-center gap-2">
+                        <FileSpreadsheet className="h-3 w-3 text-cyan-400" />
+                        {f.filename}
+                        <span className="text-[10px] text-muted-foreground">({f.rowCount?.toLocaleString()} rows)</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRunDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleRunWithFiles} disabled={runDialogSubmitting || !runDialogDefId || !runDialogFileA || !runDialogFileB}>
+              {runDialogSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Play className="h-4 w-4 mr-1.5" />}
+              Run Reconciliation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
