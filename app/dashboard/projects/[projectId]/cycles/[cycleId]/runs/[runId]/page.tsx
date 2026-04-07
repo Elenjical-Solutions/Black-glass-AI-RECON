@@ -10,6 +10,8 @@ import {
 } from "@/actions/results-actions"
 import { getExplanationKeysAction } from "@/actions/explanation-keys-actions"
 import { explainDifferencesAction, generateSummaryAction } from "@/actions/ai-actions"
+import { BreakAnalysisPanel } from "@/components/ai/break-analysis-panel"
+import { KeySuggestionInline } from "@/components/ai/key-suggestion-inline"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -500,7 +502,12 @@ export default function RunResultsPage({
             </SelectContent>
           </Select>
 
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <BreakAnalysisPanel
+              runId={runId}
+              projectId={projectId}
+              onApplied={() => loadResults()}
+            />
             <Sheet open={aiPanelOpen} onOpenChange={setAiPanelOpen}>
               <SheetTrigger className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium border border-input bg-background shadow-xs hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2">
                   <Sparkles className="h-4 w-4" />
@@ -755,15 +762,28 @@ export default function RunResultsPage({
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {result.aiExplanation && (
-                        <Badge
-                          variant="outline"
-                          className="text-xs gap-1"
-                        >
-                          <Sparkles className="h-3 w-3" />
-                          AI
-                        </Badge>
-                      )}
+                      <div className="flex items-center justify-end gap-1.5">
+                        {result.status === "break" &&
+                          !result.explanationKey && (
+                            <KeySuggestionInline
+                              resultId={result.id}
+                              projectId={projectId}
+                              explanationKeys={explanationKeys}
+                              onAssign={(rid, kid) =>
+                                handleAssignKey(rid, kid)
+                              }
+                            />
+                          )}
+                        {result.aiExplanation && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs gap-1"
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            AI
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
 

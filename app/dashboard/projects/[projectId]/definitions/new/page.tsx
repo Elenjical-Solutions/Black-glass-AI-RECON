@@ -32,6 +32,7 @@ import {
   ArrowLeft, Loader2, Plus, Trash2, FileSpreadsheet, Upload,
   ArrowRight, Check, Sparkles
 } from "lucide-react"
+import { suggestFieldMappingsAction } from "@/actions/ai-actions"
 import { toast } from "sonner"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -94,6 +95,7 @@ export default function NewDefinitionPage({
 
   // Field mappings (auto-generated from headers)
   const [mappings, setMappings] = useState<FieldMappingRow[]>([])
+  const [aiSuggesting, setAiSuggesting] = useState(false)
 
   const loadExistingFiles = useCallback(async () => {
     const result = await getFilesForProjectAction(projectId)
@@ -193,6 +195,58 @@ export default function NewDefinitionPage({
     setMappings(newMappings)
     setStep(2)
     toast.success(`Auto-mapped ${newMappings.length} fields (${newMappings.filter(m => m.isKey).length} keys)`)
+  }
+
+  async function handleAiSuggestMappings() {
+    if (headersA.length === 0 || headersB.length === 0) {
+      toast.error("Both files must have detected headers")
+      return
+    }
+
+    setAiSuggesting(true)
+    try {
+      const result = await suggestFieldMappingsAction(
+        headersA,
+        headersB,
+        previewA.length > 0 ? previewA : undefined,
+        previewB.length > 0 ? previewB : undefined
+      )
+
+      if (result.status === "success" && result.data.length > 0) {
+        const aiMappings: FieldMappingRow[] = result.data.map(m => ({
+          fieldA: m.fieldA,
+          fieldB: m.fieldB,
+          matcherType: m.matcherType || "text",
+          tolerance: m.suggestedTolerance?.toString() ?? (m.matcherType === "number" ? "0.01" : ""),
+          toleranceType: m.matcherType === "number" ? "absolute" : "",
+          isKey: false,
+        }))
+
+        // Mark likely key fields
+        for (const m of aiMappings) {
+          const lower = m.fieldA.toLowerCase().replace(/[\s_-]/g, "")
+          if (["tradeid", "portfolio", "bookid"].some(k => lower.includes(k))) {
+            m.isKey = true
+          }
+        }
+
+        setMappings(aiMappings)
+        setStep(2)
+
+        const avgConfidence = Math.round(
+          result.data.reduce((sum, m) => sum + (m.confidence || 0), 0) / result.data.length
+        )
+        toast.success(
+          `AI mapped ${aiMappings.length} fields with avg ${avgConfidence}% confidence`
+        )
+      } else {
+        toast.error(result.status === "error" ? result.message : "No mappings returned")
+      }
+    } catch {
+      toast.error("AI field mapping suggestion failed")
+    } finally {
+      setAiSuggesting(false)
+    }
   }
 
   function updateMapping(index: number, field: keyof FieldMappingRow, value: any) {
@@ -472,7 +526,19 @@ export default function NewDefinitionPage({
             </div>
           )}
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={handleAiSuggestMappings}
+              disabled={!canProceedToMapping || aiSuggesting}
+            >
+              {aiSuggesting ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-1.5" />
+              )}
+              AI Suggest Mappings
+            </Button>
             <Button onClick={generateMappings} disabled={!canProceedToMapping}>
               Auto-Detect Columns & Map
               <ArrowRight className="h-4 w-4 ml-1.5" />

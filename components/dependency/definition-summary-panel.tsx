@@ -4,6 +4,7 @@ import { CheckCircle2, XCircle, AlertTriangle, HelpCircle, ArrowRight, Sparkles,
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { DependencySuggestionPanel } from "@/components/ai/dependency-suggestion-panel"
 import type { DefinitionWithStats } from "./tree-browser"
 
 interface ExplanationKeySummary {
@@ -30,6 +31,7 @@ interface DefinitionSummaryPanelProps {
   projectId: string
   cycleId: string | null
   onNavigateToResults: (runId: string) => void
+  onEdgeAdded?: () => void
 }
 
 const categoryBadgeStyles: Record<string, { bg: string; text: string; label: string }> = {
@@ -53,6 +55,7 @@ export function DefinitionSummaryPanel({
   projectId,
   cycleId,
   onNavigateToResults,
+  onEdgeAdded,
 }: DefinitionSummaryPanelProps) {
   if (!definition) {
     return (
@@ -204,6 +207,21 @@ export function DefinitionSummaryPanel({
             </div>
           </div>
         )}
+
+      {/* AI Dependency Suggestions for downstream */}
+      {category === "downstream" && (
+        <div className="pt-2 border-t border-border">
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <Sparkles className="h-3 w-3" />
+            AI Dependencies
+          </h4>
+          <DependencySuggestionPanel
+            definitionId={definition.id}
+            projectId={projectId}
+            onEdgeAdded={onEdgeAdded ?? (() => {})}
+          />
+        </div>
+      )}
 
       {/* Actions */}
       <div className="pt-2 border-t border-border space-y-2">

@@ -18,6 +18,18 @@ import {
 } from "@/lib/ai/screenshot-analyzer"
 import { generateSummary } from "@/lib/ai/summary-generator"
 import { ActionState } from "@/types/actions-types"
+import { getAIClient, DEFAULT_MODEL } from "@/lib/ai/client"
+import { parseJsonFromResponse } from "@/lib/ai/utils"
+import { db } from "@/db/db"
+import {
+  reconciliationResultsTable,
+  resultFieldDetailsTable,
+  explanationKeysTable,
+  reconciliationRunsTable,
+  reconciliationDefinitionsTable,
+  fieldMappingsTable,
+} from "@/db/schema"
+import { eq, and, inArray } from "drizzle-orm"
 
 export async function suggestFieldMappingsAction(
   headersA: string[],
@@ -96,6 +108,532 @@ export async function generateSummaryAction(stats: {
   try {
     const data = await generateSummary(stats)
     return { status: "success", data }
+  } catch (error: any) {
+    return { status: "error", message: error.message }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 1. analyzeBreakPatternsAction
+// ---------------------------------------------------------------------------
+
+interface BreakCluster {
+  name: string
+  description: string
+  tradeCount: number
+  tradeIds: string[]
+  suggestedKeyCode: string
+  confidence: number
+  avgDiff: number
+}
+
+interface BreakAnomaly {
+  tradeId: string
+  reason: string
+  severity: string
+}
+
+interface BreakPatternAnalysis {
+  clusters: BreakCluster[]
+  anomalies: BreakAnomaly[]
+  summary: string
+  totalBreaksAnalyzed: number
+}
+
+export async function analyzeBreakPatternsAction(
+  runId: string
+): Promise<ActionState<BreakPatternAnalysis>> {
+  try {
+    // Load the run and its definition for context
+    const run = await db
+      .select()
+      .from(reconciliationRunsTable)
+      .where(eq(reconciliationRunsTable.id, runId))
+      .then(rows => rows[0])
+
+    if (!run) {
+      return { status: "error", message: "Run not found" }
+    }
+
+    const definition = await db
+      .select()
+      .from(reconciliationDefinitionsTable)
+      .where(eq(reconciliationDefinitionsTable.id, run.definitionId))
+      .then(rows => rows[0])
+
+    // Load all break results for this run
+    let breakResults = await db
+      .select()
+      .from(reconciliationResultsTable)
+      .where(
+        and(
+          eq(reconciliationResultsTable.runId, runId),
+          eq(reconciliationResultsTable.status, "break")
+        )
+      )
+
+    const totalBreaks = breakResults.length
+
+    if (totalBreaks === 0) {
+      return {
+        status: "success",
+        data: {
+          clusters: [],
+          anomalies: [],
+          summary: "No breaks found for this run.",
+          totalBreaksAnalyzed: 0,
+        },
+      }
+    }
+
+    // Sample if more than 200 breaks — spread across asset classes
+    if (breakResults.length > 200) {
+      // Group by rowKeyValue prefix to get diversity, then take evenly
+      const step = Math.floor(breakResults.length / 200)
+      breakResults = breakResults.filter((_, i) => i % step === 0).slice(0, 200)
+    }
+
+    // Batch-load field details for the sampled break results
+    const breakResultIds = breakResults.map(r => r.id)
+    const fieldDetails = await db
+      .select()
+      .from(resultFieldDetailsTable)
+      .where(inArray(resultFieldDetailsTable.resultId, breakResultIds))
+
+    // Load field mappings for human-readable field names
+    const fieldMappings = definition
+      ? await db
+          .select()
+          .from(fieldMappingsTable)
+          .where(eq(fieldMappingsTable.definitionId, definition.id))
+      : []
+
+    const fieldMappingLookup = new Map(
+      fieldMappings.map(fm => [fm.id, fm])
+    )
+
+    // Group field details by resultId
+    const detailsByResult = new Map<string, typeof fieldDetails>()
+    for (const fd of fieldDetails) {
+      const list = detailsByResult.get(fd.resultId) ?? []
+      list.push(fd)
+      detailsByResult.set(fd.resultId, list)
+    }
+
+    // Load explanation keys for the project
+    const projectId = definition?.projectId
+    const explanationKeys = projectId
+      ? await db
+          .select()
+          .from(explanationKeysTable)
+          .where(eq(explanationKeysTable.projectId, projectId))
+      : []
+
+    // Load total trade count from the run (all results, not just breaks)
+    const allResults = await db
+      .select()
+      .from(reconciliationResultsTable)
+      .where(eq(reconciliationResultsTable.runId, runId))
+
+    const totalTrades = allResults.length
+
+    // Build the structured data for AI
+    const breaksForAI = breakResults.map(r => {
+      const details = detailsByResult.get(r.id) ?? []
+      return {
+        trade_id: r.rowKeyValue,
+        typology: r.aiCategory ?? "unknown",
+        asset_class: definition?.category ?? "unknown",
+        currency: "N/A",
+        fieldDiffs: details.map(d => {
+          const mapping = fieldMappingLookup.get(d.fieldMappingId)
+          return {
+            fieldName: mapping
+              ? `${mapping.fieldNameA} / ${mapping.fieldNameB}`
+              : d.fieldMappingId,
+            valueA: d.valueA,
+            valueB: d.valueB,
+            numericDiff: d.numericDiff ? Number(d.numericDiff) : null,
+          }
+        }),
+      }
+    })
+
+    const keysForAI = explanationKeys.map(k => ({
+      code: k.code,
+      label: k.label,
+      description: k.description,
+    }))
+
+    const systemPrompt =
+      "You are a senior financial reconciliation analyst specializing in trading system upgrades. " +
+      "Analyze ALL breaks holistically to identify PATTERNS and CLUSTERS, not individual rows. " +
+      "Group breaks by root cause. For each cluster: describe the pattern, count of affected trades, " +
+      "which explanation key matches, confidence %. Flag any ANOMALIES that don't fit known patterns. " +
+      'Return JSON: { "clusters": [{ "name": string, "description": string, "tradeCount": number, ' +
+      '"tradeIds": string[], "suggestedKeyCode": string, "confidence": number, "avgDiff": number }], ' +
+      '"anomalies": [{ "tradeId": string, "reason": string, "severity": string }], "summary": string }'
+
+    const userMessage =
+      `Reconciliation: ${definition?.name ?? "Unknown"}\n` +
+      `Category: ${definition?.category ?? "N/A"}\n` +
+      `Total trades: ${totalTrades}, Total breaks: ${totalBreaks}, ` +
+      `Breaks analyzed: ${breakResults.length}\n\n` +
+      `Available explanation keys:\n${JSON.stringify(keysForAI, null, 2)}\n\n` +
+      `Break details:\n${JSON.stringify(breaksForAI, null, 2)}`
+
+    const client = getAIClient()
+    const response = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    })
+
+    const text =
+      response.content[0].type === "text" ? response.content[0].text : ""
+    const parsed = parseJsonFromResponse(text)
+
+    return {
+      status: "success",
+      data: {
+        clusters: parsed.clusters ?? [],
+        anomalies: parsed.anomalies ?? [],
+        summary: parsed.summary ?? "",
+        totalBreaksAnalyzed: breakResults.length,
+      },
+    }
+  } catch (error: any) {
+    return { status: "error", message: error.message }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2. suggestDependenciesAction
+// ---------------------------------------------------------------------------
+
+interface DependencySuggestion {
+  definitionId: string
+  definitionName: string
+  confidence: number
+  reason: string
+  sharedColumns: string[]
+}
+
+export async function suggestDependenciesAction(
+  definitionId: string,
+  projectId: string
+): Promise<ActionState<{ suggestions: DependencySuggestion[] }>> {
+  try {
+    // Load the target definition's field mappings
+    const targetMappings = await db
+      .select()
+      .from(fieldMappingsTable)
+      .where(eq(fieldMappingsTable.definitionId, definitionId))
+
+    const targetDefinition = await db
+      .select()
+      .from(reconciliationDefinitionsTable)
+      .where(eq(reconciliationDefinitionsTable.id, definitionId))
+      .then(rows => rows[0])
+
+    if (!targetDefinition) {
+      return { status: "error", message: "Definition not found" }
+    }
+
+    // Load all OTHER definitions in the project
+    const allDefinitions = await db
+      .select()
+      .from(reconciliationDefinitionsTable)
+      .where(eq(reconciliationDefinitionsTable.projectId, projectId))
+
+    const otherDefinitions = allDefinitions.filter(d => d.id !== definitionId)
+
+    if (otherDefinitions.length === 0) {
+      return {
+        status: "success",
+        data: { suggestions: [] },
+      }
+    }
+
+    // Batch-load field mappings for all other definitions
+    const otherDefIds = otherDefinitions.map(d => d.id)
+    const otherMappings = await db
+      .select()
+      .from(fieldMappingsTable)
+      .where(inArray(fieldMappingsTable.definitionId, otherDefIds))
+
+    // Group mappings by definition
+    const mappingsByDef = new Map<string, typeof otherMappings>()
+    for (const m of otherMappings) {
+      const list = mappingsByDef.get(m.definitionId) ?? []
+      list.push(m)
+      mappingsByDef.set(m.definitionId, list)
+    }
+
+    const targetColumns = targetMappings.map(m => m.fieldNameA)
+
+    const otherDefsForAI = otherDefinitions.map(d => ({
+      definitionId: d.id,
+      name: d.name,
+      category: d.category,
+      columns: (mappingsByDef.get(d.id) ?? []).map(m => m.fieldNameA),
+    }))
+
+    const systemPrompt =
+      "You are a financial reconciliation dependency analyst. " +
+      "Given a downstream reconciliation report and existing definitions, suggest which definitions " +
+      "this report likely depends on for explanation propagation. Consider: if a column appears in both " +
+      "a core/sensitivity recon and this downstream report, there's likely a dependency. " +
+      'Return JSON: { "suggestions": [{ "definitionId": string, "definitionName": string, ' +
+      '"confidence": number, "reason": string, "sharedColumns": string[] }] }'
+
+    const userMessage =
+      `Target definition: "${targetDefinition.name}" (category: ${targetDefinition.category ?? "N/A"})\n` +
+      `Target columns: ${JSON.stringify(targetColumns)}\n\n` +
+      `Existing definitions in the project:\n${JSON.stringify(otherDefsForAI, null, 2)}`
+
+    const client = getAIClient()
+    const response = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    })
+
+    const text =
+      response.content[0].type === "text" ? response.content[0].text : ""
+    const parsed = parseJsonFromResponse(text)
+
+    return {
+      status: "success",
+      data: { suggestions: parsed.suggestions ?? [] },
+    }
+  } catch (error: any) {
+    return { status: "error", message: error.message }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. suggestExplanationKeyAction
+// ---------------------------------------------------------------------------
+
+interface KeySuggestionAlternative {
+  code: string
+  confidence: number
+  reason: string
+}
+
+interface KeySuggestionResult {
+  suggestedKeyCode: string
+  confidence: number
+  reasoning: string
+  alternatives: KeySuggestionAlternative[]
+}
+
+export async function suggestExplanationKeyAction(
+  resultId: string,
+  projectId: string
+): Promise<ActionState<KeySuggestionResult>> {
+  try {
+    // Load the result
+    const result = await db
+      .select()
+      .from(reconciliationResultsTable)
+      .where(eq(reconciliationResultsTable.id, resultId))
+      .then(rows => rows[0])
+
+    if (!result) {
+      return { status: "error", message: "Result not found" }
+    }
+
+    // Load field details for this result
+    const fieldDetails = await db
+      .select()
+      .from(resultFieldDetailsTable)
+      .where(eq(resultFieldDetailsTable.resultId, resultId))
+
+    // Load the run and definition for context
+    const run = await db
+      .select()
+      .from(reconciliationRunsTable)
+      .where(eq(reconciliationRunsTable.id, result.runId))
+      .then(rows => rows[0])
+
+    const definition = run
+      ? await db
+          .select()
+          .from(reconciliationDefinitionsTable)
+          .where(eq(reconciliationDefinitionsTable.id, run.definitionId))
+          .then(rows => rows[0])
+      : null
+
+    // Load field mappings for human-readable names
+    const fieldMappingIds = fieldDetails.map(fd => fd.fieldMappingId)
+    const fieldMappings =
+      fieldMappingIds.length > 0
+        ? await db
+            .select()
+            .from(fieldMappingsTable)
+            .where(inArray(fieldMappingsTable.id, fieldMappingIds))
+        : []
+
+    const fieldMappingLookup = new Map(
+      fieldMappings.map(fm => [fm.id, fm])
+    )
+
+    // Load explanation keys
+    const explanationKeys = await db
+      .select()
+      .from(explanationKeysTable)
+      .where(eq(explanationKeysTable.projectId, projectId))
+
+    if (explanationKeys.length === 0) {
+      return {
+        status: "error",
+        message: "No explanation keys configured for this project",
+      }
+    }
+
+    const diffsForAI = fieldDetails.map(d => {
+      const mapping = fieldMappingLookup.get(d.fieldMappingId)
+      return {
+        fieldName: mapping
+          ? `${mapping.fieldNameA} / ${mapping.fieldNameB}`
+          : d.fieldMappingId,
+        valueA: d.valueA,
+        valueB: d.valueB,
+        numericDiff: d.numericDiff ? Number(d.numericDiff) : null,
+        isMatch: d.isMatch,
+      }
+    })
+
+    const keysForAI = explanationKeys.map(k => ({
+      code: k.code,
+      label: k.label,
+      description: k.description,
+    }))
+
+    const systemPrompt =
+      "You are analyzing a single reconciliation break. Given the field differences, product type, " +
+      "and available explanation keys, suggest which key best explains this break and why. " +
+      "Consider: the magnitude of diffs, which fields changed, the product type. " +
+      'Return JSON: { "suggestedKeyCode": string, "confidence": number, "reasoning": string, ' +
+      '"alternativeKeyCodes": [{ "code": string, "confidence": number, "reason": string }] }'
+
+    const userMessage =
+      `Trade ID: ${result.rowKeyValue}\n` +
+      `Definition: ${definition?.name ?? "Unknown"}\n` +
+      `Category: ${definition?.category ?? "N/A"}\n` +
+      `Current AI category: ${result.aiCategory ?? "N/A"}\n\n` +
+      `Field differences:\n${JSON.stringify(diffsForAI, null, 2)}\n\n` +
+      `Available explanation keys:\n${JSON.stringify(keysForAI, null, 2)}`
+
+    const client = getAIClient()
+    const response = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    })
+
+    const text =
+      response.content[0].type === "text" ? response.content[0].text : ""
+    const parsed = parseJsonFromResponse(text)
+
+    return {
+      status: "success",
+      data: {
+        suggestedKeyCode: parsed.suggestedKeyCode,
+        confidence: parsed.confidence,
+        reasoning: parsed.reasoning,
+        alternatives: parsed.alternativeKeyCodes ?? [],
+      },
+    }
+  } catch (error: any) {
+    return { status: "error", message: error.message }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. applyBreakAnalysisSuggestionsAction
+// ---------------------------------------------------------------------------
+
+export async function applyBreakAnalysisSuggestionsAction(
+  runId: string,
+  clusters: Array<{ tradeIds: string[]; suggestedKeyCode: string }>
+): Promise<ActionState<{ updatedCount: number }>> {
+  try {
+    // Load the run to get the project context
+    const run = await db
+      .select()
+      .from(reconciliationRunsTable)
+      .where(eq(reconciliationRunsTable.id, runId))
+      .then(rows => rows[0])
+
+    if (!run) {
+      return { status: "error", message: "Run not found" }
+    }
+
+    const definition = await db
+      .select()
+      .from(reconciliationDefinitionsTable)
+      .where(eq(reconciliationDefinitionsTable.id, run.definitionId))
+      .then(rows => rows[0])
+
+    if (!definition) {
+      return { status: "error", message: "Definition not found" }
+    }
+
+    // Load all explanation keys for the project to look up by code
+    const explanationKeys = await db
+      .select()
+      .from(explanationKeysTable)
+      .where(eq(explanationKeysTable.projectId, definition.projectId))
+
+    const keyByCode = new Map(explanationKeys.map(k => [k.code, k]))
+
+    let updatedCount = 0
+
+    for (const cluster of clusters) {
+      const key = keyByCode.get(cluster.suggestedKeyCode)
+      if (!key) {
+        console.warn(
+          `Explanation key not found for code: ${cluster.suggestedKeyCode}`
+        )
+        continue
+      }
+
+      if (cluster.tradeIds.length === 0) continue
+
+      // Find results matching these trade IDs (rowKeyValue) in this run
+      const matchingResults = await db
+        .select({ id: reconciliationResultsTable.id })
+        .from(reconciliationResultsTable)
+        .where(
+          and(
+            eq(reconciliationResultsTable.runId, runId),
+            inArray(reconciliationResultsTable.rowKeyValue, cluster.tradeIds)
+          )
+        )
+
+      if (matchingResults.length === 0) continue
+
+      const resultIds = matchingResults.map(r => r.id)
+
+      // Update in batch
+      await db
+        .update(reconciliationResultsTable)
+        .set({ explanationKeyId: key.id })
+        .where(inArray(reconciliationResultsTable.id, resultIds))
+
+      updatedCount += resultIds.length
+    }
+
+    return {
+      status: "success",
+      data: { updatedCount },
+    }
   } catch (error: any) {
     return { status: "error", message: error.message }
   }

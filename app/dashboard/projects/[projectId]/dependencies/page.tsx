@@ -294,6 +294,7 @@ export default function DependenciesPage({
             projectId={projectId}
             cycleId={latestCycleId}
             onNavigateToResults={handleNavigateToResults}
+            onEdgeAdded={loadData}
           />
         </div>
       </div>
