@@ -104,15 +104,26 @@ export default function ExplanationKeysPage({
   function openEdit(key: ExplanationKey) {
     setEditingId(key.id)
     const pattern = key.autoMatchPattern as any
+    // Handle both old format (field, diffRange[]) and new format (fieldName, diffRangeMin/Max)
+    const fieldName = pattern?.fieldName ?? pattern?.field ?? ""
+    let diffMin = ""
+    let diffMax = ""
+    if (Array.isArray(pattern?.diffRange)) {
+      diffMin = pattern.diffRange[0]?.toString() ?? ""
+      diffMax = pattern.diffRange[1]?.toString() ?? ""
+    } else {
+      diffMin = pattern?.diffRangeMin?.toString() ?? ""
+      diffMax = pattern?.diffRangeMax?.toString() ?? ""
+    }
     setForm({
       code: key.code,
       label: key.label,
       description: key.description ?? "",
       color: key.color ?? "#3b82f6",
       naturalLanguageRule: (key as any).naturalLanguageRule ?? "",
-      autoMatchFieldName: pattern?.fieldName ?? "",
-      autoMatchDiffMin: pattern?.diffRangeMin?.toString() ?? "",
-      autoMatchDiffMax: pattern?.diffRangeMax?.toString() ?? "",
+      autoMatchFieldName: fieldName,
+      autoMatchDiffMin: diffMin,
+      autoMatchDiffMax: diffMax,
       autoMatchValueAPattern: pattern?.valueAPattern ?? "",
       autoMatchValueBPattern: pattern?.valueBPattern ?? ""
     })
@@ -128,9 +139,10 @@ export default function ExplanationKeysPage({
     setIsSubmitting(true)
 
     const autoMatchPattern: any = {}
-    if (form.autoMatchFieldName) autoMatchPattern.fieldName = form.autoMatchFieldName
-    if (form.autoMatchDiffMin) autoMatchPattern.diffRangeMin = parseFloat(form.autoMatchDiffMin)
-    if (form.autoMatchDiffMax) autoMatchPattern.diffRangeMax = parseFloat(form.autoMatchDiffMax)
+    if (form.autoMatchFieldName) autoMatchPattern.field = form.autoMatchFieldName
+    if (form.autoMatchDiffMin && form.autoMatchDiffMax) {
+      autoMatchPattern.diffRange = [parseFloat(form.autoMatchDiffMin), parseFloat(form.autoMatchDiffMax)]
+    }
     if (form.autoMatchValueAPattern) autoMatchPattern.valueAPattern = form.autoMatchValueAPattern
     if (form.autoMatchValueBPattern) autoMatchPattern.valueBPattern = form.autoMatchValueBPattern
 
@@ -230,63 +242,81 @@ export default function ExplanationKeysPage({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-[100px]">Color</TableHead>
                 <TableHead>Code</TableHead>
                 <TableHead>Label</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Color</TableHead>
-                <TableHead>Auto-match Pattern</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>AI Rule</TableHead>
+                <TableHead className="w-[120px]">Auto-match</TableHead>
+                <TableHead className="text-right w-[100px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {keys.map(key => (
-                <TableRow key={key.id}>
-                  <TableCell>
-                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                      {key.code}
-                    </code>
-                  </TableCell>
-                  <TableCell className="font-medium">{key.label}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate">
-                    {key.description ?? "-"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      style={{
-                        backgroundColor: `${key.color}20`,
-                        color: key.color ?? undefined,
-                        borderColor: `${key.color}40`
-                      }}
-                    >
-                      {key.color ?? "default"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
-                    {key.autoMatchPattern
-                      ? JSON.stringify(key.autoMatchPattern)
-                      : "-"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEdit(key)}
+              {keys.map(key => {
+                const pattern = key.autoMatchPattern as any
+                const hasNLR = !!(key as any).naturalLanguageRule
+                const hasPattern = !!pattern && Object.keys(pattern).length > 0
+                const patternSummary = hasPattern
+                  ? `${pattern.field ?? pattern.fieldName ?? "any"}: [${Array.isArray(pattern.diffRange) ? pattern.diffRange.join(", ") : `${pattern.diffRangeMin ?? "?"}, ${pattern.diffRangeMax ?? "?"}`}]`
+                  : null
+                return (
+                  <TableRow key={key.id}>
+                    <TableCell>
+                      <Badge
+                        style={{
+                          backgroundColor: `${key.color}20`,
+                          color: key.color ?? undefined,
+                          borderColor: `${key.color}40`
+                        }}
+                        className="text-xs"
                       >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => handleDelete(key.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        {key.label.split(" ").map(w => w[0]).join("").slice(0, 4)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                        {key.code}
+                      </code>
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium text-sm">{key.label}</p>
+                        {key.description && (
+                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{key.description}</p>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="max-w-[250px]">
+                      {hasNLR ? (
+                        <p className="text-xs text-muted-foreground line-clamp-2">
+                          {(key as any).naturalLanguageRule}
+                        </p>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/50">No AI rule set</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {patternSummary ? (
+                        <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                          {patternSummary}
+                        </code>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/50">None</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(key)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive"
+                          onClick={() => handleDelete(key.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         )}
@@ -383,15 +413,18 @@ export default function ExplanationKeysPage({
               </div>
             </div>
 
-            <div className="border-t border-border/50 pt-4">
-              <h4 className="text-sm font-semibold mb-3">
-                Auto-match Pattern (optional)
-              </h4>
-              <div className="space-y-3">
+            <details className="border-t border-border/50 pt-3">
+              <summary className="text-xs font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                Advanced: Auto-match Pattern (deterministic rules)
+              </summary>
+              <div className="space-y-3 mt-3">
+                <p className="text-[10px] text-muted-foreground">
+                  These are rigid if/then rules. For flexible matching, use the AI Rule field above instead.
+                </p>
                 <div className="space-y-2">
                   <Label className="text-xs">Field Name</Label>
                   <Input
-                    placeholder="e.g., notional_amount"
+                    placeholder="e.g., market_value"
                     value={form.autoMatchFieldName}
                     onChange={e =>
                       setForm({ ...form, autoMatchFieldName: e.target.value })
@@ -404,7 +437,7 @@ export default function ExplanationKeysPage({
                     <Input
                       type="number"
                       step="any"
-                      placeholder="-0.01"
+                      placeholder="-500"
                       value={form.autoMatchDiffMin}
                       onChange={e =>
                         setForm({ ...form, autoMatchDiffMin: e.target.value })
@@ -416,7 +449,7 @@ export default function ExplanationKeysPage({
                     <Input
                       type="number"
                       step="any"
-                      placeholder="0.01"
+                      placeholder="500"
                       value={form.autoMatchDiffMax}
                       onChange={e =>
                         setForm({ ...form, autoMatchDiffMax: e.target.value })
@@ -453,7 +486,7 @@ export default function ExplanationKeysPage({
                   </div>
                 </div>
               </div>
-            </div>
+            </details>
           </div>
 
           <DialogFooter>
