@@ -20,6 +20,8 @@ export async function createDefinitionAction(data: {
   sourceAFileId?: string
   sourceBFileId?: string
   keyFields?: any
+  category?: string
+  department?: string
 }): Promise<ActionState<ReconciliationDefinition>> {
   try {
     const [definition] = await db
@@ -30,6 +32,8 @@ export async function createDefinitionAction(data: {
         description: data.description ?? null,
         sourceAFileId: data.sourceAFileId ?? null,
         sourceBFileId: data.sourceBFileId ?? null,
+        category: data.category ?? null,
+        department: data.department ?? null,
         keyFields: data.keyFields ?? []
       })
       .returning()

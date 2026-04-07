@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -16,10 +17,9 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select"
-import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react"
+import { ArrowLeft, Loader2, Plus, Trash2, FileSpreadsheet, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
-import type { UploadedFile } from "@/db/schema/uploaded-files-schema"
 
 interface KeyFieldPair {
   fieldA: string
@@ -40,6 +40,8 @@ export default function NewDefinitionPage({
   // Form state
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [category, setCategory] = useState("")
+  const [department, setDepartment] = useState("")
   const [sourceAFileId, setSourceAFileId] = useState("")
   const [sourceBFileId, setSourceBFileId] = useState("")
   const [keyFields, setKeyFields] = useState<KeyFieldPair[]>([
@@ -52,9 +54,7 @@ export default function NewDefinitionPage({
     setLoading(false)
   }, [projectId])
 
-  useEffect(() => {
-    loadFiles()
-  }, [loadFiles])
+  useEffect(() => { loadFiles() }, [loadFiles])
 
   const sourceAFiles = files.filter(f => f.fileRole === "source_a")
   const sourceBFiles = files.filter(f => f.fileRole === "source_b")
@@ -62,12 +62,9 @@ export default function NewDefinitionPage({
   const selectedFileA = files.find(f => f.id === sourceAFileId)
   const selectedFileB = files.find(f => f.id === sourceBFileId)
 
-  const headersA = Array.isArray(selectedFileA?.parsedHeaders)
-    ? (selectedFileA.parsedHeaders as string[])
-    : []
-  const headersB = Array.isArray(selectedFileB?.parsedHeaders)
-    ? (selectedFileB.parsedHeaders as string[])
-    : []
+  const headersA = Array.isArray(selectedFileA?.parsedHeaders) ? (selectedFileA.parsedHeaders as string[]) : []
+  const headersB = Array.isArray(selectedFileB?.parsedHeaders) ? (selectedFileB.parsedHeaders as string[]) : []
+  const hasFileHeaders = headersA.length > 0 || headersB.length > 0
 
   function addKeyField() {
     setKeyFields([...keyFields, { fieldA: "", fieldB: "" }])
@@ -77,11 +74,7 @@ export default function NewDefinitionPage({
     setKeyFields(keyFields.filter((_, i) => i !== index))
   }
 
-  function updateKeyField(
-    index: number,
-    field: "fieldA" | "fieldB",
-    value: string
-  ) {
+  function updateKeyField(index: number, field: "fieldA" | "fieldB", value: string) {
     const updated = [...keyFields]
     updated[index] = { ...updated[index], [field]: value }
     setKeyFields(updated)
@@ -89,30 +82,24 @@ export default function NewDefinitionPage({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-
-    if (!name.trim()) {
-      toast.error("Definition name is required")
-      return
-    }
+    if (!name.trim()) { toast.error("Definition name is required"); return }
 
     setIsSubmitting(true)
     try {
       const validKeyFields = keyFields.filter(kf => kf.fieldA && kf.fieldB)
-
       const result = await createDefinitionAction({
         projectId,
         name: name.trim(),
         description: description.trim() || undefined,
         sourceAFileId: sourceAFileId || undefined,
         sourceBFileId: sourceBFileId || undefined,
-        keyFields: validKeyFields
+        keyFields: validKeyFields,
+        category: category || undefined,
+        department: department || undefined,
       })
-
       if (result.status === "success") {
-        toast.success("Definition created successfully")
-        router.push(
-          `/dashboard/projects/${projectId}/definitions/${result.data.id}`
-        )
+        toast.success("Definition created")
+        router.push(`/dashboard/projects/${projectId}/definitions/${result.data.id}`)
       } else {
         toast.error(result.message)
       }
@@ -134,9 +121,9 @@ export default function NewDefinitionPage({
       </Link>
 
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">New Definition</h2>
+        <h2 className="text-2xl font-bold tracking-tight">New Recon Template</h2>
         <p className="mt-1 text-muted-foreground">
-          Define how two data sources should be compared
+          Define a reusable reconciliation template. Files are selected when you run the recon, not here.
         </p>
       </div>
 
@@ -145,11 +132,11 @@ export default function NewDefinitionPage({
           {/* Name */}
           <div className="space-y-2">
             <Label htmlFor="name">
-              Name <span className="text-destructive">*</span>
+              Template Name <span className="text-destructive">*</span>
             </Label>
             <Input
               id="name"
-              placeholder="e.g., Trade Position Reconciliation"
+              placeholder="e.g., Core Trade Reconciliation"
               value={name}
               onChange={e => setName(e.target.value)}
               disabled={isSubmitting}
@@ -162,7 +149,7 @@ export default function NewDefinitionPage({
             <Label htmlFor="description">Description</Label>
             <Textarea
               id="description"
-              placeholder="Describe what this definition reconciles..."
+              placeholder="Describe what this template reconciles..."
               value={description}
               onChange={e => setDescription(e.target.value)}
               disabled={isSubmitting}
@@ -170,126 +157,152 @@ export default function NewDefinitionPage({
             />
           </div>
 
-          {/* Source Files */}
+          {/* Category & Department */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Source A File</Label>
-              {loading ? (
-                <div className="h-10 bg-muted rounded animate-pulse" />
-              ) : (
-                <Select value={sourceAFileId} onValueChange={(v: string | null) => setSourceAFileId(v ?? "")}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Source A file" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sourceAFiles.map(f => (
-                      <SelectItem key={f.id} value={f.id}>
-                        {f.filename}
-                      </SelectItem>
-                    ))}
-                    {sourceAFiles.length === 0 && (
-                      <SelectItem value="__none" disabled>
-                        No Source A files uploaded
-                      </SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              )}
+              <Label>Category</Label>
+              <Select value={category} onValueChange={(v: string | null) => setCategory(v ?? "")}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="core">Core Reconciliation</SelectItem>
+                  <SelectItem value="sensitivity">Sensitivity</SelectItem>
+                  <SelectItem value="downstream">Downstream Report</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-
             <div className="space-y-2">
-              <Label>Source B File</Label>
-              {loading ? (
-                <div className="h-10 bg-muted rounded animate-pulse" />
-              ) : (
-                <Select value={sourceBFileId} onValueChange={(v: string | null) => setSourceBFileId(v ?? "")}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Source B file" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sourceBFiles.map(f => (
-                      <SelectItem key={f.id} value={f.id}>
-                        {f.filename}
-                      </SelectItem>
-                    ))}
-                    {sourceBFiles.length === 0 && (
-                      <SelectItem value="__none" disabled>
-                        No Source B files uploaded
-                      </SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              )}
+              <Label>Department / Asset Class</Label>
+              <Input
+                placeholder="e.g., IR, FX, Market Risk, Finance"
+                value={department}
+                onChange={e => setDepartment(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Default Source Files (optional) */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Label>Default Source Files</Label>
+              <Badge variant="outline" className="text-[10px]">Optional</Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Optionally link sample files for header detection. Files are always selected per-run.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">Source A (reference)</span>
+                {loading ? (
+                  <div className="h-10 bg-muted rounded animate-pulse" />
+                ) : (
+                  <Select value={sourceAFileId} onValueChange={(v: string | null) => setSourceAFileId(v ?? "")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sourceAFiles.map(f => (
+                        <SelectItem key={f.id} value={f.id}>
+                          <span className="flex items-center gap-2">
+                            <FileSpreadsheet className="h-3 w-3 text-blue-400" />
+                            {f.filename}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">Source B (reference)</span>
+                {loading ? (
+                  <div className="h-10 bg-muted rounded animate-pulse" />
+                ) : (
+                  <Select value={sourceBFileId} onValueChange={(v: string | null) => setSourceBFileId(v ?? "")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sourceBFiles.map(f => (
+                        <SelectItem key={f.id} value={f.id}>
+                          <span className="flex items-center gap-2">
+                            <FileSpreadsheet className="h-3 w-3 text-cyan-400" />
+                            {f.filename}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Key Fields */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>Key Fields</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={addKeyField}
-              >
+              <Label>Key Fields (Row Matching)</Label>
+              <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={addKeyField}>
                 <Plus className="h-3.5 w-3.5" />
                 Add Key
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Key fields are used to match rows between the two sources
+              Key fields identify the same row across both files (e.g., trade_id + portfolio).
+              {hasFileHeaders ? " Select from file headers below." : " Type field names manually."}
             </p>
 
             <div className="space-y-2">
               {keyFields.map((kf, index) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-2"
-                >
-                  <Select
-                    value={kf.fieldA}
-                    onValueChange={(v: string | null) => updateKeyField(index, "fieldA", v ?? "")}
-                  >
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Field A" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {headersA.map(h => (
-                        <SelectItem key={h} value={h}>
-                          {h}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div key={index} className="flex items-center gap-2">
+                  {/* Field A */}
+                  {hasFileHeaders && headersA.length > 0 ? (
+                    <Select value={kf.fieldA} onValueChange={(v: string | null) => updateKeyField(index, "fieldA", v ?? "")}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Field A" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {headersA.map(h => (
+                          <SelectItem key={h} value={h}>{h}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      placeholder="Field A (e.g., trade_id)"
+                      value={kf.fieldA}
+                      onChange={e => updateKeyField(index, "fieldA", e.target.value)}
+                      className="flex-1"
+                    />
+                  )}
 
                   <span className="text-muted-foreground text-sm">=</span>
 
-                  <Select
-                    value={kf.fieldB}
-                    onValueChange={(v: string | null) => updateKeyField(index, "fieldB", v ?? "")}
-                  >
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Field B" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {headersB.map(h => (
-                        <SelectItem key={h} value={h}>
-                          {h}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {/* Field B */}
+                  {hasFileHeaders && headersB.length > 0 ? (
+                    <Select value={kf.fieldB} onValueChange={(v: string | null) => updateKeyField(index, "fieldB", v ?? "")}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Field B" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {headersB.map(h => (
+                          <SelectItem key={h} value={h}>{h}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      placeholder="Field B (e.g., trade_id)"
+                      value={kf.fieldB}
+                      onChange={e => updateKeyField(index, "fieldB", e.target.value)}
+                      className="flex-1"
+                    />
+                  )}
 
                   {keyFields.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeKeyField(index)}
-                      className="text-destructive hover:text-destructive shrink-0"
-                    >
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeKeyField(index)}
+                      className="text-destructive hover:text-destructive shrink-0">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   )}
@@ -300,21 +313,12 @@ export default function NewDefinitionPage({
 
           {/* Submit */}
           <div className="flex items-center gap-3 pt-2">
-            <Button
-              type="submit"
-              disabled={isSubmitting || !name.trim()}
-            >
-              {isSubmitting && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Create Definition
+            <Button type="submit" disabled={isSubmitting || !name.trim()}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create Template
             </Button>
-            <Link
-              href={`/dashboard/projects/${projectId}/definitions`}
-            >
-              <Button type="button" variant="outline" disabled={isSubmitting}>
-                Cancel
-              </Button>
+            <Link href={`/dashboard/projects/${projectId}/definitions`}>
+              <Button type="button" variant="outline" disabled={isSubmitting}>Cancel</Button>
             </Link>
           </div>
         </form>
