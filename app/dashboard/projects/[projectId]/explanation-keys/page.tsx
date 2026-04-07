@@ -239,17 +239,17 @@ export default function ExplanationKeysPage({
             </Button>
           </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="text-xs">
-                <TableHead className="py-2 w-8"></TableHead>
-                <TableHead className="py-2">Key</TableHead>
-                <TableHead className="py-2">AI Rule</TableHead>
-                <TableHead className="py-2 w-[90px]">Auto-match</TableHead>
-                <TableHead className="py-2 text-right w-[80px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border/50 text-xs text-muted-foreground">
+                <th className="py-2 pl-4 pr-1 w-5 text-left"></th>
+                <th className="py-2 px-2 text-left w-[280px]">Key</th>
+                <th className="py-2 px-2 text-left">AI Rule</th>
+                <th className="py-2 px-2 text-left w-[110px]">Auto-match</th>
+                <th className="py-2 pr-4 w-[60px]"></th>
+              </tr>
+            </thead>
+            <tbody>
               {keys.map(key => {
                 const pattern = key.autoMatchPattern as any
                 const hasNLR = !!(key as any).naturalLanguageRule
@@ -258,17 +258,17 @@ export default function ExplanationKeysPage({
                   ? `${pattern.field ?? pattern.fieldName ?? "any"}: [${Array.isArray(pattern.diffRange) ? pattern.diffRange.join(",") : `${pattern.diffRangeMin ?? "?"}, ${pattern.diffRangeMax ?? "?"}`}]`
                   : null
                 return (
-                  <TableRow key={key.id} className="group">
-                    <TableCell className="py-1.5">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: key.color ?? "#6b7280" }} />
-                    </TableCell>
-                    <TableCell className="py-1.5">
-                      <div className="flex items-center gap-2">
+                  <tr key={key.id} className="group border-b border-border/30 hover:bg-accent/20 transition-colors">
+                    <td className="py-1.5 pl-4 pr-1">
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: key.color ?? "#6b7280" }} />
+                    </td>
+                    <td className="py-1.5 px-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
                         <code className="text-[10px] bg-muted px-1 py-0.5 rounded shrink-0">{key.code}</code>
                         <span className="text-xs font-medium truncate">{key.label}</span>
                       </div>
-                    </TableCell>
-                    <TableCell className="py-1.5 max-w-[300px]">
+                    </td>
+                    <td className="py-1.5 px-2">
                       {hasNLR ? (
                         <p className="text-[11px] text-muted-foreground line-clamp-1" title={(key as any).naturalLanguageRule}>
                           {(key as any).naturalLanguageRule}
@@ -276,30 +276,30 @@ export default function ExplanationKeysPage({
                       ) : (
                         <span className="text-[11px] text-muted-foreground/40">—</span>
                       )}
-                    </TableCell>
-                    <TableCell className="py-1.5">
+                    </td>
+                    <td className="py-1.5 px-2">
                       {patternSummary ? (
-                        <code className="text-[10px] bg-muted px-1 py-0.5 rounded text-muted-foreground">{patternSummary}</code>
+                        <code className="text-[10px] bg-muted px-1 py-0.5 rounded text-muted-foreground whitespace-nowrap">{patternSummary}</code>
                       ) : (
                         <span className="text-[11px] text-muted-foreground/40">—</span>
                       )}
-                    </TableCell>
-                    <TableCell className="py-1.5 text-right">
+                    </td>
+                    <td className="py-1.5 pr-4 text-right">
                       <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(key)}>
-                          <Pencil className="h-3.5 w-3.5" />
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEdit(key)}>
+                          <Pencil className="h-3 w-3" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive"
                           onClick={() => handleDelete(key.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 )
               })}
-            </TableBody>
-          </Table>
+            </tbody>
+          </table>
         )}
       </Card>
 
