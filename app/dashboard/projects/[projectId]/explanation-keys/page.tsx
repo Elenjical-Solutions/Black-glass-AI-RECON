@@ -268,9 +268,9 @@ export default function ExplanationKeysPage({
                         <span className="text-xs font-medium truncate">{key.label}</span>
                       </div>
                     </td>
-                    <td className="py-1.5 px-2">
+                    <td className="py-1.5 px-2 max-w-[400px]">
                       {hasNLR ? (
-                        <p className="text-[11px] text-muted-foreground line-clamp-1" title={(key as any).naturalLanguageRule}>
+                        <p className="text-[11px] text-muted-foreground line-clamp-3 whitespace-normal break-words">
                           {(key as any).naturalLanguageRule}
                         </p>
                       ) : (
