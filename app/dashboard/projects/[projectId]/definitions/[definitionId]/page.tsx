@@ -74,7 +74,7 @@ export default function DefinitionDetailPage({
   const [headersA, setHeadersA] = useState<string[]>([])
   const [headersB, setHeadersB] = useState<string[]>([])
   const [mappings, setMappings] = useState<MappingRow[]>([])
-  const [files, setFiles] = useState<UploadedFile[]>([])
+  const [files, setFiles] = useState<any[]>([])
 
   const loadData = useCallback(async () => {
     const [defResult, filesResult] = await Promise.all([

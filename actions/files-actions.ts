@@ -50,16 +50,32 @@ export async function uploadFileAction(
   }
 }
 
+/**
+ * List files for a project WITHOUT loading fileContent (the massive CSV/XML body).
+ * fileContent is only loaded when explicitly needed (preview, reconciliation run).
+ */
 export async function getFilesForProjectAction(
   projectId: string
-): Promise<ActionState<UploadedFile[]>> {
+): Promise<ActionState<Omit<UploadedFile, "fileContent">[]>> {
   try {
     const files = await db
-      .select()
+      .select({
+        id: uploadedFilesTable.id,
+        projectId: uploadedFilesTable.projectId,
+        uploaderId: uploadedFilesTable.uploaderId,
+        filename: uploadedFilesTable.filename,
+        mimeType: uploadedFilesTable.mimeType,
+        size: uploadedFilesTable.size,
+        fileRole: uploadedFilesTable.fileRole,
+        parsedHeaders: uploadedFilesTable.parsedHeaders,
+        rowCount: uploadedFilesTable.rowCount,
+        createdAt: uploadedFilesTable.createdAt,
+        updatedAt: uploadedFilesTable.updatedAt,
+      })
       .from(uploadedFilesTable)
       .where(eq(uploadedFilesTable.projectId, projectId))
 
-    return { status: "success", data: files }
+    return { status: "success", data: files as any }
   } catch (error: any) {
     return { status: "error", message: error.message }
   }
@@ -73,7 +89,10 @@ export async function getFilePreviewAction(
 > {
   try {
     const [file] = await db
-      .select()
+      .select({
+        filename: uploadedFilesTable.filename,
+        fileContent: uploadedFilesTable.fileContent,
+      })
       .from(uploadedFilesTable)
       .where(eq(uploadedFilesTable.id, fileId))
 

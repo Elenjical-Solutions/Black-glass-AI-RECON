@@ -33,7 +33,7 @@ export default function NewDefinitionPage({
 }) {
   const { projectId } = use(params)
   const router = useRouter()
-  const [files, setFiles] = useState<UploadedFile[]>([])
+  const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
 

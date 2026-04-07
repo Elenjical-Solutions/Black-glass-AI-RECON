@@ -51,7 +51,7 @@ export default function FilesPage({
   params: Promise<{ projectId: string }>
 }) {
   const { projectId } = use(params)
-  const [files, setFiles] = useState<UploadedFile[]>([])
+  const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)

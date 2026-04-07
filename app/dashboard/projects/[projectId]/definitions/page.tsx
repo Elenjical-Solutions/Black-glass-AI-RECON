@@ -19,7 +19,7 @@ export default function DefinitionsPage({
 }) {
   const { projectId } = use(params)
   const [definitions, setDefinitions] = useState<ReconciliationDefinition[]>([])
-  const [files, setFiles] = useState<UploadedFile[]>([])
+  const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
