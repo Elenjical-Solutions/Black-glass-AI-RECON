@@ -16,6 +16,7 @@ export const explanationKeysTable = pgTable(
     label: text("label").notNull(),
     description: text("description"),
     autoMatchPattern: jsonb("auto_match_pattern"),
+    naturalLanguageRule: text("natural_language_rule"), // Human-readable rule for AI assignment
     color: text("color"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")

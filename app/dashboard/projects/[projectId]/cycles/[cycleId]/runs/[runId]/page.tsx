@@ -9,7 +9,7 @@ import {
   bulkAssignExplanationKeyAction
 } from "@/actions/results-actions"
 import { getExplanationKeysAction } from "@/actions/explanation-keys-actions"
-import { explainDifferencesAction, generateSummaryAction } from "@/actions/ai-actions"
+import { explainDifferencesAction, generateSummaryAction, aiAssignByNaturalLanguageRulesAction } from "@/actions/ai-actions"
 import { BreakAnalysisPanel } from "@/components/ai/break-analysis-panel"
 import { KeySuggestionInline } from "@/components/ai/key-suggestion-inline"
 import { Button } from "@/components/ui/button"
@@ -137,6 +137,27 @@ export default function RunResultsPage({
   const [aiLoading, setAiLoading] = useState(false)
   const [aiSummary, setAiSummary] = useState("")
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false)
+  const [nlrAssigning, setNlrAssigning] = useState(false)
+
+  async function handleNLRAssign() {
+    setNlrAssigning(true)
+    try {
+      const result = await aiAssignByNaturalLanguageRulesAction(runId)
+      if (result.status === "success") {
+        toast.success(
+          `AI assigned ${result.data.totalAssigned} keys to ${result.data.assignments.length} breaks using natural language rules`
+        )
+        loadResults()
+        loadRun()
+      } else {
+        toast.error(result.message)
+      }
+    } catch {
+      toast.error("AI rule assignment failed")
+    } finally {
+      setNlrAssigning(false)
+    }
+  }
 
   const loadRun = useCallback(async () => {
     const [runResult, ctxResult] = await Promise.all([
@@ -503,6 +524,19 @@ export default function RunResultsPage({
           </Select>
 
           <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={handleNLRAssign}
+              disabled={nlrAssigning}
+            >
+              {nlrAssigning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              AI Assign by Rules
+            </Button>
             <BreakAnalysisPanel
               runId={runId}
               projectId={projectId}

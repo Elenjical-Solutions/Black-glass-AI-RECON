@@ -1087,12 +1087,8 @@ async function seed() {
       tolerance: f.tolerance ? parseFloat(f.tolerance) : undefined,
       toleranceType: f.tolerance ? "absolute" : undefined,
     })),
-    explanationKeys: EXPLANATION_KEYS.map(ek => ({
-      id: expKeyIds[ek.code],
-      code: ek.code,
-      label: ek.label,
-      autoMatchPattern: ek.autoMatchPattern as any,
-    })),
+    // Explanation keys are no longer auto-applied during recon
+    // autoApplyKeys: false (default)
   })
 
   console.log(`   ✓ Reconciliation complete:`)

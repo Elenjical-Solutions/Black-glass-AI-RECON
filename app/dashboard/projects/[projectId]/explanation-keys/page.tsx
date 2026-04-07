@@ -51,6 +51,7 @@ interface FormState {
   label: string
   description: string
   color: string
+  naturalLanguageRule: string
   autoMatchFieldName: string
   autoMatchDiffMin: string
   autoMatchDiffMax: string
@@ -63,6 +64,7 @@ const emptyForm: FormState = {
   label: "",
   description: "",
   color: "#3b82f6",
+  naturalLanguageRule: "",
   autoMatchFieldName: "",
   autoMatchDiffMin: "",
   autoMatchDiffMax: "",
@@ -107,6 +109,7 @@ export default function ExplanationKeysPage({
       label: key.label,
       description: key.description ?? "",
       color: key.color ?? "#3b82f6",
+      naturalLanguageRule: (key as any).naturalLanguageRule ?? "",
       autoMatchFieldName: pattern?.fieldName ?? "",
       autoMatchDiffMin: pattern?.diffRangeMin?.toString() ?? "",
       autoMatchDiffMax: pattern?.diffRangeMax?.toString() ?? "",
@@ -138,6 +141,7 @@ export default function ExplanationKeysPage({
           label: form.label.trim(),
           description: form.description.trim() || undefined,
           color: form.color,
+          naturalLanguageRule: form.naturalLanguageRule.trim() || undefined,
           autoMatchPattern:
             Object.keys(autoMatchPattern).length > 0
               ? autoMatchPattern
@@ -157,6 +161,7 @@ export default function ExplanationKeysPage({
           label: form.label.trim(),
           description: form.description.trim() || undefined,
           color: form.color,
+          naturalLanguageRule: form.naturalLanguageRule.trim() || undefined,
           autoMatchPattern:
             Object.keys(autoMatchPattern).length > 0
               ? autoMatchPattern
@@ -332,6 +337,23 @@ export default function ExplanationKeysPage({
                 }
                 rows={2}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                AI Rule (Natural Language)
+                <Badge variant="outline" className="text-[10px] font-normal">For AI assignment</Badge>
+              </Label>
+              <Textarea
+                placeholder="e.g., For basis swaps where the MV difference is below 1% of notional and maturity is less than 3 years, with DV01 shifting proportionally, this is the bootstrapping methodology change."
+                value={form.naturalLanguageRule}
+                onChange={e => setForm({ ...form, naturalLanguageRule: e.target.value })}
+                rows={3}
+                className="text-sm"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Describe when this key should apply in plain English. AI reads this rule when assigning keys to breaks.
+              </p>
             </div>
 
             <div className="space-y-2">

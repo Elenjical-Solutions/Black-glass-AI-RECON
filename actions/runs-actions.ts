@@ -105,12 +105,6 @@ export async function triggerRunAction(
         .from(fieldMappingsTable)
         .where(eq(fieldMappingsTable.definitionId, definitionId))
 
-      // Load explanation keys for the project
-      const expKeys = await db
-        .select()
-        .from(explanationKeysTable)
-        .where(eq(explanationKeysTable.projectId, definition.projectId))
-
       // Parse files
       const formatA = detectFormat(fileA.filename, fileA.fileContent)
       const formatB = detectFormat(fileB.filename, fileB.fileContent)
@@ -130,13 +124,6 @@ export async function triggerRunAction(
         matcherType: m.matcherType,
         tolerance: m.tolerance ? parseFloat(m.tolerance) : undefined,
         toleranceType: m.toleranceType ?? undefined
-      }))
-
-      const explanationKeyRules = expKeys.map(ek => ({
-        id: ek.id,
-        code: ek.code,
-        label: ek.label,
-        autoMatchPattern: ek.autoMatchPattern as any
       }))
 
       // Build a mapping of fieldNameA -> fieldMappingId for DB writes
@@ -238,7 +225,6 @@ export async function triggerRunAction(
         const chunkedConfig: ChunkedReconConfig = {
           keyFields,
           fieldMappings: fieldMappingsConfig,
-          explanationKeys: explanationKeyRules,
           chunkSize
         }
 
@@ -273,7 +259,6 @@ export async function triggerRunAction(
         const config: ReconConfig = {
           keyFields,
           fieldMappings: fieldMappingsConfig,
-          explanationKeys: explanationKeyRules
         }
 
         const output = runReconciliation(parsedA, parsedB, config)

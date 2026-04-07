@@ -12,6 +12,7 @@ export async function createExplanationKeyAction(data: {
   label: string
   description?: string
   autoMatchPattern?: any
+  naturalLanguageRule?: string
   color?: string
 }): Promise<ActionState<ExplanationKey>> {
   try {
@@ -23,6 +24,7 @@ export async function createExplanationKeyAction(data: {
         label: data.label,
         description: data.description ?? null,
         autoMatchPattern: data.autoMatchPattern ?? null,
+        naturalLanguageRule: data.naturalLanguageRule ?? null,
         color: data.color ?? null
       })
       .returning()
@@ -55,6 +57,7 @@ export async function updateExplanationKeyAction(
     label: string
     description: string
     autoMatchPattern: any
+    naturalLanguageRule: string
     color: string
   }>
 ): Promise<ActionState<ExplanationKey>> {

@@ -6,7 +6,8 @@ import { applyExplanationKeys, ExplanationKeyRule, AppliedExplanation } from "./
 export interface ReconConfig {
   keyFields: KeyFieldPair[]
   fieldMappings: FieldMapping[]
-  explanationKeys: ExplanationKeyRule[]
+  explanationKeys?: ExplanationKeyRule[] // Optional: if provided AND autoApply=true, runs deterministic pattern matching
+  autoApplyKeys?: boolean // Default false — keys are not auto-applied unless explicitly requested
 }
 
 export interface ReconResultRow {
@@ -88,33 +89,34 @@ export function runReconciliation(
     })
   }
 
-  // Step 4: Apply explanation keys to breaks
-  const breakResults = results
-    .filter((r) => r.status === "break")
-    .map((r, _i) => ({
-      index: results.indexOf(r),
-      status: r.status,
-      fields: r.fields.map((f) => ({
-        fieldNameA: f.fieldNameA,
-        valueA: f.valueA,
-        valueB: f.valueB,
-        numericDiff: f.matcherResult.numericDiff,
-        isMatch: f.isMatch,
-      })),
-    }))
+  // Step 4: Optionally apply explanation keys (only if autoApplyKeys is true)
+  if (config.autoApplyKeys && config.explanationKeys && config.explanationKeys.length > 0) {
+    const breakResults = results
+      .filter((r) => r.status === "break")
+      .map((r, _i) => ({
+        index: results.indexOf(r),
+        status: r.status,
+        fields: r.fields.map((f) => ({
+          fieldNameA: f.fieldNameA,
+          valueA: f.valueA,
+          valueB: f.valueB,
+          numericDiff: f.matcherResult.numericDiff,
+          isMatch: f.isMatch,
+        })),
+      }))
 
-  const appliedExplanations: AppliedExplanation[] = applyExplanationKeys(
-    breakResults,
-    config.explanationKeys
-  )
+    const appliedExplanations: AppliedExplanation[] = applyExplanationKeys(
+      breakResults,
+      config.explanationKeys
+    )
 
-  // Apply explanations back to results
-  for (const explanation of appliedExplanations) {
-    const result = results[explanation.resultIndex]
-    if (result) {
-      result.explanationKeyId = explanation.explanationKeyId
-      result.explanationKeyCode = explanation.explanationKeyCode
-      result.explanationReason = explanation.reason
+    for (const explanation of appliedExplanations) {
+      const result = results[explanation.resultIndex]
+      if (result) {
+        result.explanationKeyId = explanation.explanationKeyId
+        result.explanationKeyCode = explanation.explanationKeyCode
+        result.explanationReason = explanation.reason
+      }
     }
   }
 

@@ -28,6 +28,7 @@ import {
   reconciliationRunsTable,
   reconciliationDefinitionsTable,
   fieldMappingsTable,
+  resultExplanationKeysTable,
 } from "@/db/schema"
 import { eq, and, inArray } from "drizzle-orm"
 
@@ -649,6 +650,237 @@ export async function applyBreakAnalysisSuggestionsAction(
     return {
       status: "success",
       data: { updatedCount },
+    }
+  } catch (error: any) {
+    return { status: "error", message: error.message }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5. AI Natural Language Rule Assignment (multi-key)
+// ---------------------------------------------------------------------------
+
+interface NLRAssignment {
+  tradeId: string
+  resultId: string
+  assignments: Array<{
+    keyCode: string
+    confidence: number
+    reasoning: string
+  }>
+}
+
+interface NLRAssignmentResult {
+  assignments: NLRAssignment[]
+  summary: string
+  totalAssigned: number
+  totalBreaksProcessed: number
+}
+
+/**
+ * Read all explanation keys' natural language rules, analyze breaks,
+ * and assign MULTIPLE keys per break based on the NL rules.
+ * Each assignment includes confidence and per-field reasoning.
+ */
+export async function aiAssignByNaturalLanguageRulesAction(
+  runId: string
+): Promise<ActionState<NLRAssignmentResult>> {
+  try {
+    const run = await db
+      .select()
+      .from(reconciliationRunsTable)
+      .where(eq(reconciliationRunsTable.id, runId))
+      .then(rows => rows[0])
+
+    if (!run) return { status: "error", message: "Run not found" }
+
+    const definition = await db
+      .select()
+      .from(reconciliationDefinitionsTable)
+      .where(eq(reconciliationDefinitionsTable.id, run.definitionId))
+      .then(rows => rows[0])
+
+    // Load breaks
+    let breakResults = await db
+      .select()
+      .from(reconciliationResultsTable)
+      .where(
+        and(
+          eq(reconciliationResultsTable.runId, runId),
+          eq(reconciliationResultsTable.status, "break")
+        )
+      )
+
+    if (breakResults.length === 0) {
+      return {
+        status: "success",
+        data: { assignments: [], summary: "No breaks to analyze.", totalAssigned: 0, totalBreaksProcessed: 0 }
+      }
+    }
+
+    // Sample if too many
+    const totalBreaks = breakResults.length
+    if (breakResults.length > 150) {
+      const step = Math.floor(breakResults.length / 150)
+      breakResults = breakResults.filter((_, i) => i % step === 0).slice(0, 150)
+    }
+
+    // Load field details
+    const breakIds = breakResults.map(r => r.id)
+    const fieldDetails = await db
+      .select()
+      .from(resultFieldDetailsTable)
+      .where(inArray(resultFieldDetailsTable.resultId, breakIds))
+
+    // Load field mapping names
+    const fieldMappings = definition
+      ? await db.select().from(fieldMappingsTable).where(eq(fieldMappingsTable.definitionId, definition.id))
+      : []
+    const fmLookup = new Map(fieldMappings.map(fm => [fm.id, fm]))
+
+    const detailsByResult = new Map<string, typeof fieldDetails>()
+    for (const fd of fieldDetails) {
+      const list = detailsByResult.get(fd.resultId) ?? []
+      list.push(fd)
+      detailsByResult.set(fd.resultId, list)
+    }
+
+    // Load explanation keys WITH natural language rules
+    const projectId = definition?.projectId
+    const keys = projectId
+      ? await db.select().from(explanationKeysTable).where(eq(explanationKeysTable.projectId, projectId))
+      : []
+
+    const keysWithRules = keys.filter(k => k.naturalLanguageRule)
+
+    if (keysWithRules.length === 0) {
+      return {
+        status: "error",
+        message: "No explanation keys have natural language rules defined. Add rules to your keys first."
+      }
+    }
+
+    // Build break data for AI
+    const breaksForAI = breakResults.map(r => {
+      const details = detailsByResult.get(r.id) ?? []
+      return {
+        resultId: r.id,
+        trade_id: r.rowKeyValue,
+        fieldDiffs: details.map(d => {
+          const mapping = fmLookup.get(d.fieldMappingId)
+          return {
+            fieldName: mapping?.fieldNameA ?? d.fieldMappingId,
+            valueA: d.valueA,
+            valueB: d.valueB,
+            numericDiff: d.numericDiff ? Number(d.numericDiff) : null,
+            isMatch: d.isMatch,
+          }
+        }).filter(d => !d.isMatch), // Only send non-matching fields
+      }
+    })
+
+    // Build key rules for AI
+    const keyRulesForAI = keysWithRules.map(k => ({
+      code: k.code,
+      label: k.label,
+      rule: k.naturalLanguageRule,
+    }))
+
+    const systemPrompt =
+      "You are a senior financial reconciliation analyst. You are given:\n" +
+      "1. A set of explanation keys, each with a NATURAL LANGUAGE RULE describing when it should apply.\n" +
+      "2. A set of reconciliation breaks, each with field-by-field differences.\n\n" +
+      "Your job: For each break, evaluate ALL rules and assign EVERY key that applies. " +
+      "A single break CAN have MULTIPLE keys (e.g., an IRS trade might have both a bootstrapping change AND a daycount correction).\n\n" +
+      "For each assignment, provide:\n" +
+      "- The key code\n" +
+      "- Confidence (0-100)\n" +
+      "- Reasoning: explain per-field WHY this rule matches, referencing specific field names and values\n\n" +
+      "If NO rule matches a break, still include it with an empty assignments array.\n\n" +
+      "Return JSON:\n" +
+      '{\n  "assignments": [\n    {\n      "trade_id": "...",\n' +
+      '      "keys": [\n        { "keyCode": "...", "confidence": 85, "reasoning": "DV01_par shifted from 1234.5 to 1271.2 (3% increase), market_value moved proportionally. This matches the bootstrap methodology rule for IR products." }\n' +
+      '      ]\n    }\n  ],\n  "summary": "Overall summary of the assignment run"\n}'
+
+    const userMessage =
+      `Reconciliation: ${definition?.name ?? "Unknown"}\n` +
+      `Total breaks: ${totalBreaks}, Analyzed: ${breakResults.length}\n\n` +
+      `=== EXPLANATION KEY RULES ===\n${keyRulesForAI.map(k => `[${k.code}] ${k.label}\nRule: ${k.rule}`).join("\n\n")}\n\n` +
+      `=== BREAKS ===\n${JSON.stringify(breaksForAI, null, 2)}`
+
+    const client = getAIClient()
+    const response = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    })
+
+    const text = response.content[0].type === "text" ? response.content[0].text : ""
+    const parsed = parseJsonFromResponse(text)
+
+    // Build a map of resultId by trade_id
+    const resultIdByTradeId = new Map(breakResults.map(r => [r.rowKeyValue, r.id]))
+    const keyIdByCode = new Map(keys.map(k => [k.code, k.id]))
+
+    // Insert assignments into junction table
+    let totalAssigned = 0
+    const nlrAssignments: NLRAssignment[] = []
+
+    for (const item of (parsed.assignments ?? [])) {
+      const resultId = resultIdByTradeId.get(item.trade_id)
+      if (!resultId) continue
+
+      const assignments: NLRAssignment["assignments"] = []
+      for (const key of (item.keys ?? [])) {
+        const keyId = keyIdByCode.get(key.keyCode)
+        if (!keyId) continue
+
+        await db.insert(resultExplanationKeysTable).values({
+          resultId,
+          explanationKeyId: keyId,
+          assignedBy: "ai_nlr",
+          confidence: key.confidence ?? null,
+          reasoning: key.reasoning ?? null,
+        })
+
+        assignments.push({
+          keyCode: key.keyCode,
+          confidence: key.confidence ?? 0,
+          reasoning: key.reasoning ?? "",
+        })
+        totalAssigned++
+      }
+
+      // Also update the legacy single-key field (first key) for backward compatibility
+      if (assignments.length > 0) {
+        const primaryKeyId = keyIdByCode.get(assignments[0].keyCode)
+        if (primaryKeyId) {
+          await db
+            .update(reconciliationResultsTable)
+            .set({
+              explanationKeyId: primaryKeyId,
+              aiExplanation: assignments.map(a => `[${a.keyCode}] ${a.reasoning}`).join("\n\n"),
+            })
+            .where(eq(reconciliationResultsTable.id, resultId))
+        }
+      }
+
+      nlrAssignments.push({
+        tradeId: item.trade_id,
+        resultId,
+        assignments,
+      })
+    }
+
+    return {
+      status: "success",
+      data: {
+        assignments: nlrAssignments,
+        summary: parsed.summary ?? `Assigned ${totalAssigned} keys across ${nlrAssignments.length} breaks using natural language rules.`,
+        totalAssigned,
+        totalBreaksProcessed: breakResults.length,
+      }
     }
   } catch (error: any) {
     return { status: "error", message: error.message }

@@ -5,11 +5,8 @@ import {
   FieldMapping,
   FieldComparisonResult
 } from "@/lib/recon/field-comparator"
-import {
-  applyExplanationKeys,
-  ExplanationKeyRule,
-  AppliedExplanation
-} from "@/lib/recon/explanation-applier"
+// Note: Explanation keys are no longer applied during reconciliation.
+// They are applied via AI from the results page.
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,7 +15,6 @@ import {
 export interface ChunkedReconConfig {
   keyFields: KeyFieldPair[]
   fieldMappings: FieldMapping[]
-  explanationKeys: ExplanationKeyRule[]
   chunkSize: number // rows per chunk (default 5000)
 }
 
@@ -85,7 +81,7 @@ export async function runChunkedReconciliation(
   const startTime = Date.now()
   const elapsed = () => Date.now() - startTime
 
-  const { keyFields, fieldMappings, explanationKeys, chunkSize } = config
+  const { keyFields, fieldMappings, chunkSize } = config
   const fieldsA = keyFields.map((kf) => kf.fieldA)
   const fieldsB = keyFields.map((kf) => kf.fieldB)
 
@@ -162,34 +158,8 @@ export async function runChunkedReconciliation(
       }
     }
 
-    // Apply explanation keys to break results in this chunk
-    const breakResults = chunkResults
-      .filter((r) => r.status === "break")
-      .map((r, _i) => ({
-        index: chunkResults.indexOf(r),
-        status: r.status,
-        fields: r.fields.map((f) => ({
-          fieldNameA: f.fieldNameA,
-          valueA: f.valueA,
-          valueB: f.valueB,
-          numericDiff: f.matcherResult.numericDiff,
-          isMatch: f.isMatch
-        }))
-      }))
-
-    const applied: AppliedExplanation[] = applyExplanationKeys(
-      breakResults,
-      explanationKeys
-    )
-
-    for (const explanation of applied) {
-      const result = chunkResults[explanation.resultIndex]
-      if (result) {
-        result.explanationKeyId = explanation.explanationKeyId
-        result.explanationKeyCode = explanation.explanationKeyCode
-        result.explanationReason = explanation.reason
-      }
-    }
+    // Note: Explanation keys are no longer applied during recon.
+    // Users trigger AI-based assignment explicitly from the results page.
 
     // Accumulate summary counts
     for (const r of chunkResults) {
