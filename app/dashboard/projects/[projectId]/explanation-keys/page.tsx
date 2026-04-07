@@ -294,7 +294,7 @@ export default function ExplanationKeysPage({
 
       {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingId ? "Edit Explanation Key" : "New Explanation Key"}

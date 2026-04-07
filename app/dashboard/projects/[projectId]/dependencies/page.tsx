@@ -301,7 +301,7 @@ export default function DependenciesPage({
 
       {/* Add Dependency Dialog */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="sm:max-w-md glass-card">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto glass-card">
           <DialogHeader>
             <DialogTitle>Add Dependency Edge</DialogTitle>
             <DialogDescription>

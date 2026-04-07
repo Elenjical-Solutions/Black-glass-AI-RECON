@@ -586,7 +586,7 @@ export default function FoldersPage({
 
       {/* Import success dialog */}
       <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-emerald-400" />

@@ -302,7 +302,7 @@ export default function CycleDetailPage({
 
       {/* Run with Files Dialog */}
       <Dialog open={runDialogOpen} onOpenChange={setRunDialogOpen}>
-        <DialogContent className="sm:max-w-md glass-card">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto glass-card">
           <DialogHeader>
             <DialogTitle>Run Reconciliation with Files</DialogTitle>
           </DialogHeader>

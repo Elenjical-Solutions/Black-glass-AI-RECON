@@ -199,7 +199,7 @@ export default function CyclesPage({
 
       {/* Create Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>New Regression Cycle</DialogTitle>
           </DialogHeader>
