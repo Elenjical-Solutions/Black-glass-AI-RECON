@@ -266,13 +266,29 @@ export async function analyzeBreakPatternsAction(
     }))
 
     const systemPrompt =
-      "You are a senior financial reconciliation analyst specializing in trading system upgrades. " +
+      "You are a senior financial reconciliation analyst specializing in trading system upgrades (e.g., Murex MX.3). " +
       "Analyze ALL breaks holistically to identify PATTERNS and CLUSTERS, not individual rows. " +
-      "Group breaks by root cause. For each cluster: describe the pattern, count of affected trades, " +
-      "which explanation key matches, confidence %. Flag any ANOMALIES that don't fit known patterns. " +
-      'Return JSON: { "clusters": [{ "name": string, "description": string, "tradeCount": number, ' +
-      '"tradeIds": string[], "suggestedKeyCode": string, "confidence": number, "avgDiff": number }], ' +
-      '"anomalies": [{ "tradeId": string, "reason": string, "severity": string }], "summary": string }'
+      "Group breaks by root cause.\n\n" +
+      "For each cluster you MUST provide:\n" +
+      "- name: short cluster label\n" +
+      "- description: 2-3 sentence explanation of the root cause\n" +
+      "- tradeCount: number of trades in this cluster\n" +
+      "- tradeIds: array of trade IDs in this cluster\n" +
+      "- suggestedKeyCode: which explanation key to assign (from the provided list)\n" +
+      "- confidence: 0-100 confidence percentage\n" +
+      "- avgDiff: average numeric difference across the key field\n" +
+      "- fieldEvidence: array of per-field rationale objects, each with:\n" +
+      "  - fieldName: the column name\n" +
+      "  - observation: what you observe in this field across the cluster (e.g., 'DV01_par shifted by 2-5% consistently')\n" +
+      "  - direction: 'increased' | 'decreased' | 'mixed' | 'unchanged'\n" +
+      "  - avgMagnitude: average absolute change in this field\n" +
+      "  - isKeyDriver: boolean — is this the primary field driving this cluster?\n\n" +
+      "Flag any ANOMALIES that don't fit known patterns. For anomalies, explain per-field why they are unusual.\n\n" +
+      "Return JSON: {\n" +
+      '  "clusters": [{ "name", "description", "tradeCount", "tradeIds", "suggestedKeyCode", "confidence", "avgDiff", ' +
+      '"fieldEvidence": [{ "fieldName", "observation", "direction", "avgMagnitude", "isKeyDriver" }] }],\n' +
+      '  "anomalies": [{ "tradeId", "reason", "severity", "fieldDetails": [{ "fieldName", "valueA", "valueB", "observation" }] }],\n' +
+      '  "summary": string\n}'
 
     const userMessage =
       `Reconciliation: ${definition?.name ?? "Unknown"}\n` +
