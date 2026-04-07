@@ -1,20 +1,25 @@
 "use client"
 
-import { useState, useEffect, useCallback, use } from "react"
+import { useState, useEffect, useCallback, use, useRef } from "react"
+import { useRouter } from "next/navigation"
 import {
   getDefinitionByIdAction
 } from "@/actions/definitions-actions"
 import {
   saveFieldMappingsAction
 } from "@/actions/field-mappings-actions"
-import { getFilesForProjectAction, getFilePreviewAction } from "@/actions/files-actions"
+import { getFilesForProjectAction, getFilePreviewAction, uploadFileAction } from "@/actions/files-actions"
 import { suggestFieldMappingsAction } from "@/actions/ai-actions"
+import { triggerRunAction } from "@/actions/runs-actions"
+import { createCycleAction } from "@/actions/cycles-actions"
+import { getCyclesForProjectAction } from "@/actions/cycles-actions"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Separator } from "@/components/ui/separator"
 import {
   Table,
   TableBody,
@@ -38,7 +43,10 @@ import {
   Sparkles,
   Loader2,
   FileSpreadsheet,
-  Key
+  Key,
+  Play,
+  Upload,
+  ArrowRight
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -63,10 +71,22 @@ export default function DefinitionDetailPage({
   params: Promise<{ projectId: string; definitionId: string }>
 }) {
   const { projectId, definitionId } = use(params)
+  const router = useRouter()
+  const fileAInputRef = useRef<HTMLInputElement>(null)
+  const fileBInputRef = useRef<HTMLInputElement>(null)
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
+
+  // Run Now state
+  const [runFileA, setRunFileA] = useState<File | null>(null)
+  const [runFileB, setRunFileB] = useState<File | null>(null)
+  const [runExistingFileAId, setRunExistingFileAId] = useState("")
+  const [runExistingFileBId, setRunExistingFileBId] = useState("")
+  const [runMode, setRunMode] = useState<"upload" | "existing">("upload")
+  const [running, setRunning] = useState(false)
+  const [runProgress, setRunProgress] = useState("")
   const [definitionName, setDefinitionName] = useState("")
   const [definitionDescription, setDefinitionDescription] = useState("")
   const [sourceAFileId, setSourceAFileId] = useState<string | null>(null)
@@ -250,6 +270,81 @@ export default function DefinitionDetailPage({
     }
   }
 
+  async function handleRunNow() {
+    setRunning(true)
+    try {
+      let fileAId: string | undefined
+      let fileBId: string | undefined
+
+      if (runMode === "upload") {
+        if (!runFileA || !runFileB) {
+          toast.error("Select both files to run")
+          setRunning(false)
+          return
+        }
+        // Upload files
+        setRunProgress("Uploading Source A...")
+        const fdA = new FormData()
+        fdA.append("file", runFileA)
+        fdA.append("projectId", projectId)
+        fdA.append("fileRole", "source_a")
+        const resA = await uploadFileAction(fdA)
+        if (resA.status === "error") throw new Error(resA.message)
+        fileAId = resA.data.id
+
+        setRunProgress("Uploading Source B...")
+        const fdB = new FormData()
+        fdB.append("file", runFileB)
+        fdB.append("projectId", projectId)
+        fdB.append("fileRole", "source_b")
+        const resB = await uploadFileAction(fdB)
+        if (resB.status === "error") throw new Error(resB.message)
+        fileBId = resB.data.id
+      } else {
+        if (!runExistingFileAId || !runExistingFileBId) {
+          toast.error("Select both files to run")
+          setRunning(false)
+          return
+        }
+        fileAId = runExistingFileAId
+        fileBId = runExistingFileBId
+      }
+
+      // Find or create a cycle
+      setRunProgress("Preparing cycle...")
+      const cyclesResult = await getCyclesForProjectAction(projectId)
+      let cycleId: string
+
+      if (cyclesResult.status === "success" && cyclesResult.data.length > 0) {
+        // Use the latest cycle
+        const sorted = [...cyclesResult.data].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )
+        cycleId = sorted[0].id
+      } else {
+        // Create a new cycle
+        const newCycle = await createCycleAction(projectId, `Run ${new Date().toLocaleDateString()}`)
+        if (newCycle.status === "error") throw new Error(newCycle.message)
+        cycleId = newCycle.data.id
+      }
+
+      // Run reconciliation
+      setRunProgress("Running reconciliation...")
+      const runResult = await triggerRunAction(cycleId, definitionId, fileAId, fileBId)
+      if (runResult.status === "error") throw new Error(runResult.message)
+
+      toast.success("Reconciliation complete!")
+      router.push(`/dashboard/projects/${projectId}/cycles/${cycleId}/runs/${runResult.data.id}`)
+    } catch (err: any) {
+      toast.error(err.message || "Run failed")
+    } finally {
+      setRunning(false)
+      setRunProgress("")
+    }
+  }
+
+  const sourceAFiles = files.filter((f: any) => f.fileRole === "source_a")
+  const sourceBFiles = files.filter((f: any) => f.fileRole === "source_b")
   const fileNameA = files.find(f => f.id === sourceAFileId)?.filename
   const fileNameB = files.find(f => f.id === sourceBFileId)?.filename
 
@@ -495,6 +590,139 @@ export default function DefinitionDetailPage({
             </Table>
           </div>
         )}
+      </Card>
+
+      {/* Run Now */}
+      <Card className="glass-card p-6 border-primary/20 glow-blue">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+            <Play className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold">Run Now</h3>
+            <p className="text-xs text-muted-foreground">
+              Select two files and run this recon template immediately
+            </p>
+          </div>
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex gap-2 mb-4">
+          <Button
+            variant={runMode === "upload" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setRunMode("upload")}
+          >
+            <Upload className="h-3.5 w-3.5 mr-1.5" />
+            Upload Files
+          </Button>
+          <Button
+            variant={runMode === "existing" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setRunMode("existing")}
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+            Existing Files
+          </Button>
+        </div>
+
+        {runMode === "upload" ? (
+          <div className="grid gap-4 sm:grid-cols-2 mb-4">
+            {/* File A */}
+            <div>
+              <input ref={fileAInputRef} type="file" accept=".csv,.xml,.tsv" className="hidden"
+                onChange={e => setRunFileA(e.target.files?.[0] ?? null)} />
+              <button
+                onClick={() => fileAInputRef.current?.click()}
+                className={cn(
+                  "flex flex-col items-center justify-center w-full rounded-lg border-2 border-dashed p-4 cursor-pointer transition-all text-center",
+                  runFileA ? "border-blue-500/40 bg-blue-500/5" : "border-border/50 hover:border-primary/40"
+                )}
+              >
+                {runFileA ? (
+                  <>
+                    <FileSpreadsheet className="h-6 w-6 text-blue-400 mb-1" />
+                    <span className="text-xs font-medium">{runFileA.name}</span>
+                    <span className="text-[10px] text-muted-foreground">Source A (Old)</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-6 w-6 text-muted-foreground mb-1" />
+                    <span className="text-xs text-muted-foreground">Source A (Old / Before)</span>
+                  </>
+                )}
+              </button>
+            </div>
+            {/* File B */}
+            <div>
+              <input ref={fileBInputRef} type="file" accept=".csv,.xml,.tsv" className="hidden"
+                onChange={e => setRunFileB(e.target.files?.[0] ?? null)} />
+              <button
+                onClick={() => fileBInputRef.current?.click()}
+                className={cn(
+                  "flex flex-col items-center justify-center w-full rounded-lg border-2 border-dashed p-4 cursor-pointer transition-all text-center",
+                  runFileB ? "border-cyan-500/40 bg-cyan-500/5" : "border-border/50 hover:border-primary/40"
+                )}
+              >
+                {runFileB ? (
+                  <>
+                    <FileSpreadsheet className="h-6 w-6 text-cyan-400 mb-1" />
+                    <span className="text-xs font-medium">{runFileB.name}</span>
+                    <span className="text-[10px] text-muted-foreground">Source B (New)</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-6 w-6 text-muted-foreground mb-1" />
+                    <span className="text-xs text-muted-foreground">Source B (New / After)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 mb-4">
+            <div className="space-y-1.5">
+              <span className="text-xs text-muted-foreground">Source A</span>
+              <Select value={runExistingFileAId} onValueChange={(v) => v && setRunExistingFileAId(v)}>
+                <SelectTrigger><SelectValue placeholder="Select file..." /></SelectTrigger>
+                <SelectContent>
+                  {sourceAFiles.map((f: any) => (
+                    <SelectItem key={f.id} value={f.id}>{f.filename} ({f.rowCount} rows)</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-xs text-muted-foreground">Source B</span>
+              <Select value={runExistingFileBId} onValueChange={(v) => v && setRunExistingFileBId(v)}>
+                <SelectTrigger><SelectValue placeholder="Select file..." /></SelectTrigger>
+                <SelectContent>
+                  {sourceBFiles.map((f: any) => (
+                    <SelectItem key={f.id} value={f.id}>{f.filename} ({f.rowCount} rows)</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+
+        <Button
+          onClick={handleRunNow}
+          disabled={running || (runMode === "upload" ? (!runFileA || !runFileB) : (!runExistingFileAId || !runExistingFileBId))}
+          className="gap-2"
+        >
+          {running ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {runProgress || "Running..."}
+            </>
+          ) : (
+            <>
+              <Play className="h-4 w-4" />
+              Run Reconciliation
+            </>
+          )}
+        </Button>
       </Card>
     </div>
   )
