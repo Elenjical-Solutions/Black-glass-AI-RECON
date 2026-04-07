@@ -241,13 +241,12 @@ export default function ExplanationKeysPage({
         ) : (
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead className="w-[100px]">Color</TableHead>
-                <TableHead>Code</TableHead>
-                <TableHead>Label</TableHead>
-                <TableHead>AI Rule</TableHead>
-                <TableHead className="w-[120px]">Auto-match</TableHead>
-                <TableHead className="text-right w-[100px]">Actions</TableHead>
+              <TableRow className="text-xs">
+                <TableHead className="py-2 w-8"></TableHead>
+                <TableHead className="py-2">Key</TableHead>
+                <TableHead className="py-2">AI Rule</TableHead>
+                <TableHead className="py-2 w-[90px]">Auto-match</TableHead>
+                <TableHead className="py-2 text-right w-[80px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -256,61 +255,43 @@ export default function ExplanationKeysPage({
                 const hasNLR = !!(key as any).naturalLanguageRule
                 const hasPattern = !!pattern && Object.keys(pattern).length > 0
                 const patternSummary = hasPattern
-                  ? `${pattern.field ?? pattern.fieldName ?? "any"}: [${Array.isArray(pattern.diffRange) ? pattern.diffRange.join(", ") : `${pattern.diffRangeMin ?? "?"}, ${pattern.diffRangeMax ?? "?"}`}]`
+                  ? `${pattern.field ?? pattern.fieldName ?? "any"}: [${Array.isArray(pattern.diffRange) ? pattern.diffRange.join(",") : `${pattern.diffRangeMin ?? "?"}, ${pattern.diffRangeMax ?? "?"}`}]`
                   : null
                 return (
-                  <TableRow key={key.id}>
-                    <TableCell>
-                      <Badge
-                        style={{
-                          backgroundColor: `${key.color}20`,
-                          color: key.color ?? undefined,
-                          borderColor: `${key.color}40`
-                        }}
-                        className="text-xs"
-                      >
-                        {key.label.split(" ").map(w => w[0]).join("").slice(0, 4)}
-                      </Badge>
+                  <TableRow key={key.id} className="group">
+                    <TableCell className="py-1.5">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: key.color ?? "#6b7280" }} />
                     </TableCell>
-                    <TableCell>
-                      <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                        {key.code}
-                      </code>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-sm">{key.label}</p>
-                        {key.description && (
-                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{key.description}</p>
-                        )}
+                    <TableCell className="py-1.5">
+                      <div className="flex items-center gap-2">
+                        <code className="text-[10px] bg-muted px-1 py-0.5 rounded shrink-0">{key.code}</code>
+                        <span className="text-xs font-medium truncate">{key.label}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="max-w-[250px]">
+                    <TableCell className="py-1.5 max-w-[300px]">
                       {hasNLR ? (
-                        <p className="text-xs text-muted-foreground line-clamp-2">
+                        <p className="text-[11px] text-muted-foreground line-clamp-1" title={(key as any).naturalLanguageRule}>
                           {(key as any).naturalLanguageRule}
                         </p>
                       ) : (
-                        <span className="text-xs text-muted-foreground/50">No AI rule set</span>
+                        <span className="text-[11px] text-muted-foreground/40">—</span>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-1.5">
                       {patternSummary ? (
-                        <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                          {patternSummary}
-                        </code>
+                        <code className="text-[10px] bg-muted px-1 py-0.5 rounded text-muted-foreground">{patternSummary}</code>
                       ) : (
-                        <span className="text-xs text-muted-foreground/50">None</span>
+                        <span className="text-[11px] text-muted-foreground/40">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(key)}>
-                          <Pencil className="h-4 w-4" />
+                    <TableCell className="py-1.5 text-right">
+                      <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(key)}>
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive"
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
                           onClick={() => handleDelete(key.id)}>
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </TableCell>
@@ -415,12 +396,22 @@ export default function ExplanationKeysPage({
 
             <details className="border-t border-border/50 pt-3">
               <summary className="text-xs font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
-                Advanced: Auto-match Pattern (deterministic rules)
+                Advanced: Auto-match Pattern (single-field deterministic rule)
               </summary>
               <div className="space-y-3 mt-3">
-                <p className="text-[10px] text-muted-foreground">
-                  These are rigid if/then rules. For flexible matching, use the AI Rule field above instead.
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-muted-foreground">
+                    Matches ONE field. For multi-field conditions, use the AI Rule above.
+                  </p>
+                  {(form.autoMatchFieldName || form.autoMatchDiffMin || form.autoMatchDiffMax || form.autoMatchValueAPattern || form.autoMatchValueBPattern) && (
+                    <Button
+                      type="button" variant="ghost" size="sm" className="h-6 text-[10px] text-destructive"
+                      onClick={() => setForm({ ...form, autoMatchFieldName: "", autoMatchDiffMin: "", autoMatchDiffMax: "", autoMatchValueAPattern: "", autoMatchValueBPattern: "" })}
+                    >
+                      Clear all
+                    </Button>
+                  )}
+                </div>
                 <div className="space-y-2">
                   <Label className="text-xs">Field Name</Label>
                   <Input
