@@ -52,7 +52,8 @@ import {
   Search,
   FileText,
   FileSpreadsheet,
-  Tag
+  Tag,
+  Download
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -138,6 +139,28 @@ export default function RunResultsPage({
   const [aiSummary, setAiSummary] = useState("")
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false)
   const [nlrAssigning, setNlrAssigning] = useState(false)
+
+  function handleExportCSV() {
+    const csvRows = ["Row Key,Status,Explanation Key,AI Explanation"]
+    for (const r of results) {
+      const keyCode = r.explanationKey?.code ?? ""
+      // Extract additional codes from AI explanation
+      const aiCodes = r.aiExplanation
+        ? [...new Set((r.aiExplanation as string).match(/\[([A-Z_]+)\]/g)?.map(c => c.replace(/[\[\]]/g, "")) ?? [])]
+        : []
+      const allCodes = keyCode ? [keyCode, ...aiCodes.filter(c => c !== keyCode)] : aiCodes
+      const explanation = r.aiExplanation ? (r.aiExplanation as string).replace(/\n/g, " ").replace(/"/g, "'") : ""
+      csvRows.push(`"${r.rowKeyValue}","${r.status}","${allCodes.join("; ")}","${explanation}"`)
+    }
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `recon_results_${runId.slice(0, 8)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success("Results exported to CSV")
+  }
 
   async function handleNLRAssign() {
     setNlrAssigning(true)
@@ -665,9 +688,13 @@ export default function RunResultsPage({
       {/* Results Table */}
       <Card className="glass-card overflow-hidden">
         <div className="p-4 border-b border-border/50 flex items-center justify-between">
-          <h3 className="text-lg font-semibold">
-            Results ({total})
-          </h3>
+          <div className="flex items-center gap-3">
+            <h3 className="text-lg font-semibold">Results ({total})</h3>
+            <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={handleExportCSV}>
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </Button>
+          </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-2 text-sm">
               <Button
@@ -757,37 +784,48 @@ export default function RunResultsPage({
                       {statusBadge(result.status)}
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
-                      {result.explanationKey ? (
-                        <Badge
-                          style={{
-                            backgroundColor: `${result.explanationKey.color}20`,
-                            color: result.explanationKey.color ?? undefined,
-                            borderColor: `${result.explanationKey.color}40`
-                          }}
-                        >
-                          {result.explanationKey.label}
-                        </Badge>
+                      {result.explanationKey || result.aiExplanation ? (
+                        <div className="flex flex-wrap gap-0.5 max-w-[220px]">
+                          {result.explanationKey && (
+                            <Badge
+                              style={{
+                                backgroundColor: `${result.explanationKey.color}20`,
+                                color: result.explanationKey.color ?? undefined,
+                                borderColor: `${result.explanationKey.color}40`
+                              }}
+                              className="text-[10px] px-1.5 py-0 h-5"
+                              title={result.explanationKey.label}
+                            >
+                              {result.explanationKey.code}
+                            </Badge>
+                          )}
+                          {result.aiExplanation && (() => {
+                            const codes = (result.aiExplanation as string).match(/\[([A-Z_]+)\]/g)
+                            if (!codes) return null
+                            const unique = [...new Set(codes.map(c => c.replace(/[\[\]]/g, "")))]
+                            const primary = result.explanationKey?.code
+                            return unique.filter(c => c !== primary).map(code => {
+                              const k = explanationKeys.find(ek => ek.code === code)
+                              return k ? (
+                                <Badge key={code}
+                                  style={{ backgroundColor: `${k.color}20`, color: k.color ?? undefined, borderColor: `${k.color}40` }}
+                                  className="text-[10px] px-1.5 py-0 h-5" title={k.label}
+                                >{code}</Badge>
+                              ) : null
+                            })
+                          })()}
+                        </div>
                       ) : (
-                        <Select
-                          value=""
-                          onValueChange={(v: string | null) =>
-                            handleAssignKey(result.id, v || null)
-                          }
-                        >
-                          <SelectTrigger className="w-44 h-8 text-xs">
-                            <SelectValue placeholder="Assign key..." />
+                        <Select value="" onValueChange={(v: string | null) => handleAssignKey(result.id, v || null)}>
+                          <SelectTrigger className="w-32 h-6 text-[10px]">
+                            <SelectValue placeholder="Assign..." />
                           </SelectTrigger>
                           <SelectContent>
                             {explanationKeys.map(k => (
                               <SelectItem key={k.id} value={k.id}>
-                                <div className="flex items-center gap-2">
-                                  <div
-                                    className="h-2 w-2 rounded-full"
-                                    style={{
-                                      backgroundColor: k.color ?? "#6366f1"
-                                    }}
-                                  />
-                                  {k.label}
+                                <div className="flex items-center gap-1.5">
+                                  <div className="h-2 w-2 rounded-full" style={{ backgroundColor: k.color ?? "#6366f1" }} />
+                                  {k.code}
                                 </div>
                               </SelectItem>
                             ))}
@@ -888,14 +926,29 @@ export default function RunResultsPage({
                           )}
 
                           {result.aiExplanation && (
-                            <div className="mt-3 p-3 rounded-lg bg-background/50 border border-border/50">
-                              <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1">
+                            <div className="mt-3 p-3 rounded-lg bg-background/50 border border-border/50 max-w-[700px]">
+                              <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1">
                                 <Sparkles className="h-3 w-3" />
                                 AI Explanation
                               </p>
-                              <p className="text-sm">
-                                {result.aiExplanation}
-                              </p>
+                              <div className="space-y-1.5">
+                                {(result.aiExplanation as string).split(/\n\n|\[/).filter(Boolean).map((chunk, ci) => {
+                                  const codeMatch = chunk.match(/^([A-Z_]+)\]\s*(.*)/)
+                                  if (codeMatch) {
+                                    const keyDef = explanationKeys.find(k => k.code === codeMatch[1])
+                                    return (
+                                      <div key={ci} className="flex gap-2 items-start">
+                                        <Badge
+                                          style={{ backgroundColor: `${keyDef?.color ?? "#6366f1"}20`, color: keyDef?.color ?? undefined, borderColor: `${keyDef?.color ?? "#6366f1"}40` }}
+                                          className="text-[10px] px-1.5 py-0 h-5 shrink-0 mt-0.5"
+                                        >{codeMatch[1]}</Badge>
+                                        <p className="text-xs text-muted-foreground whitespace-normal break-words">{codeMatch[2].trim()}</p>
+                                      </div>
+                                    )
+                                  }
+                                  return <p key={ci} className="text-xs text-muted-foreground whitespace-normal break-words">{chunk.trim()}</p>
+                                })}
+                              </div>
                             </div>
                           )}
                         </div>
