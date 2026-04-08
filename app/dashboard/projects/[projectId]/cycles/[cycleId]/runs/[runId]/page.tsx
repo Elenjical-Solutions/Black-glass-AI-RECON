@@ -547,24 +547,26 @@ export default function RunResultsPage({
           </Select>
 
           <div className="ml-auto flex items-center gap-2">
+            {/* Step 1: Discover what patterns exist */}
+            <BreakAnalysisPanel
+              runId={runId}
+              projectId={projectId}
+              onApplied={() => loadResults()}
+            />
+            {/* Step 2: Apply your NL rules to assign keys */}
             <Button
-              variant="outline"
               className="gap-2"
               onClick={handleNLRAssign}
               disabled={nlrAssigning}
+              title="Read your natural language rules and assign explanation keys to breaks"
             >
               {nlrAssigning ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Sparkles className="h-4 w-4" />
               )}
-              AI Assign by Rules
+              Apply My Rules
             </Button>
-            <BreakAnalysisPanel
-              runId={runId}
-              projectId={projectId}
-              onApplied={() => loadResults()}
-            />
             <Sheet open={aiPanelOpen} onOpenChange={setAiPanelOpen}>
               <SheetTrigger className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium border border-input bg-background shadow-xs hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2">
                   <Sparkles className="h-4 w-4" />

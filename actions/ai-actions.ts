@@ -268,35 +268,32 @@ export async function analyzeBreakPatternsAction(
 
     const systemPrompt =
       "You are a senior financial reconciliation analyst specializing in trading system upgrades (e.g., Murex MX.3). " +
-      "Analyze ALL breaks holistically to identify PATTERNS and CLUSTERS, not individual rows. " +
-      "Group breaks by root cause.\n\n" +
+      "Your task is PURE PATTERN DISCOVERY — analyze ALL breaks to identify CLUSTERS of similar differences. " +
+      "Do NOT assign explanation keys or suggest root causes yet. Just describe what you observe.\n\n" +
       "For each cluster you MUST provide:\n" +
-      "- name: short cluster label\n" +
-      "- description: 2-3 sentence explanation of the root cause\n" +
+      "- name: short descriptive cluster label based on what you observe (e.g., 'IR DV01 Shift Group', 'Sub-Cent Rounding Group')\n" +
+      "- description: 2-3 sentences describing the observable pattern — which fields changed, by how much, on what products. Do NOT speculate on the root cause.\n" +
       "- tradeCount: number of trades in this cluster\n" +
       "- tradeIds: array of trade IDs in this cluster\n" +
-      "- suggestedKeyCode: which explanation key to assign (from the provided list)\n" +
-      "- confidence: 0-100 confidence percentage\n" +
-      "- avgDiff: average numeric difference across the key field\n" +
-      "- fieldEvidence: array of per-field rationale objects, each with:\n" +
+      "- avgDiff: average numeric difference across the key differentiating field\n" +
+      "- fieldEvidence: array of per-field observations, each with:\n" +
       "  - fieldName: the column name\n" +
-      "  - observation: what you observe in this field across the cluster (e.g., 'DV01_par shifted by 2-5% consistently')\n" +
+      "  - observation: what you observe (e.g., 'dv01_par shifted by 2-5% consistently across all trades in this group')\n" +
       "  - direction: 'increased' | 'decreased' | 'mixed' | 'unchanged'\n" +
       "  - avgMagnitude: average absolute change in this field\n" +
-      "  - isKeyDriver: boolean — is this the primary field driving this cluster?\n\n" +
-      "Flag any ANOMALIES that don't fit known patterns. For anomalies, explain per-field why they are unusual.\n\n" +
+      "  - isKeyDriver: boolean — is this the primary field differentiating this cluster?\n\n" +
+      "Flag any ANOMALIES — breaks that don't fit into any cluster. For anomalies, explain per-field why they are unusual.\n\n" +
       "Return JSON: {\n" +
-      '  "clusters": [{ "name", "description", "tradeCount", "tradeIds", "suggestedKeyCode", "confidence", "avgDiff", ' +
+      '  "clusters": [{ "name", "description", "tradeCount", "tradeIds", "avgDiff", ' +
       '"fieldEvidence": [{ "fieldName", "observation", "direction", "avgMagnitude", "isKeyDriver" }] }],\n' +
       '  "anomalies": [{ "tradeId", "reason", "severity", "fieldDetails": [{ "fieldName", "valueA", "valueB", "observation" }] }],\n' +
-      '  "summary": string\n}'
+      '  "summary": string — overall summary of what patterns you found, how many breaks are clustered vs unclustered\n}'
 
     const userMessage =
       `Reconciliation: ${definition?.name ?? "Unknown"}\n` +
       `Category: ${definition?.category ?? "N/A"}\n` +
       `Total trades: ${totalTrades}, Total breaks: ${totalBreaks}, ` +
       `Breaks analyzed: ${breakResults.length}\n\n` +
-      `Available explanation keys:\n${JSON.stringify(keysForAI, null, 2)}\n\n` +
       `Break details:\n${JSON.stringify(breaksForAI, null, 2)}`
 
     const client = getAIClient()
