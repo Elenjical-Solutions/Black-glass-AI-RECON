@@ -10,20 +10,29 @@ An AI-powered reconciliation platform for financial markets. Built for system up
 
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
-- [Step-by-Step Walkthrough](#step-by-step-walkthrough)
-  - [1. Create a Project](#1-create-a-project)
-  - [2. Upload Files](#2-upload-files)
-  - [3. Create a Recon Template (Definition)](#3-create-a-recon-template-definition)
-  - [4. Set Up Explanation Keys](#4-set-up-explanation-keys)
-  - [5. Configure Dependencies](#5-configure-dependencies)
-  - [6. Run a Reconciliation Cycle](#6-run-a-reconciliation-cycle)
-  - [7. Review Results](#7-review-results)
-  - [8. AI Features](#8-ai-features)
-- [Pre-Configured Explanation Keys](#pre-configured-explanation-keys)
-- [Demo Data for Testing](#demo-data-for-testing)
+- [Workflow: 5 Phases](#workflow-5-phases)
+- [AI Features](#ai-features)
+  - [1. Discover Patterns](#1-discover-patterns)
+  - [2. Apply My Rules (NLR)](#2-apply-my-rules-nlr)
+  - [3. AI Field Mapping](#3-ai-field-mapping)
+  - [4. AI Key Suggestion per Row](#4-ai-key-suggestion-per-row)
+  - [5. AI Dependency Suggestion](#5-ai-dependency-suggestion)
+- [Explanation Keys](#explanation-keys)
+  - [Natural Language Rules](#natural-language-rules)
+  - [Auto-Match Patterns](#auto-match-patterns)
+  - [Multi-Key Assignment](#multi-key-assignment)
+  - [Pre-Configured Keys](#pre-configured-keys)
+- [Running the Demos](#running-the-demos)
+  - [Demo 1: Discover Patterns](#demo-1-discover-patterns)
+  - [Demo 2: AI Field Mapping](#demo-2-ai-field-mapping)
+  - [Demo 3: Natural Language Rule Assignment](#demo-3-natural-language-rule-assignment)
+  - [Demo 4: Dependency Suggestion](#demo-4-dependency-suggestion)
+  - [Demo 5: Full End-to-End](#demo-5-full-end-to-end)
+- [Demo Data Reference](#demo-data-reference)
 - [Tech Stack](#tech-stack)
 - [Environment Variables](#environment-variables)
 - [Scripts](#scripts)
+- [Project Structure](#project-structure)
 
 ---
 
@@ -42,12 +51,12 @@ cp .env.example .env.local
 # 3. Push database schema
 DATABASE_URL="your-url" npx drizzle-kit push
 
-# 4. (Optional) Seed with 10K Murex demo trades
-npm run seed
+# 4. Create a clean demo project (explanation keys with NO auto-match — ideal for demos)
+npx tsx scripts/seed-demo-project.ts
 
-# 5. (Optional) Generate small test files for manual testing
-npx tsx scripts/generate-test-files.ts
+# 5. Generate demo data files
 npx tsx scripts/generate-demo-data.ts
+npx tsx scripts/generate-nlr-demo.ts
 
 # 6. Start the app
 npm run dev
@@ -60,299 +69,291 @@ npm run dev
 
 | Concept | What It Is | Example |
 |---------|-----------|---------|
-| **Project** | A container for an entire reconciliation exercise | "Murex MX 3.1.58 to 3.1.62 Upgrade" |
-| **File** | A CSV or XML data extract uploaded to the project | `core_recon_MX3158.csv` (Source A) |
-| **Definition (Recon Template)** | A reusable configuration: field mappings, match rules, tolerances, key fields | "Core Trade Reconciliation" with 15 mapped fields |
-| **Explanation Key** | A tag for a known reason why values differ | `BOOTSTRAP_METHOD` — "IR curve bootstrap changed" |
-| **Dependency Edge** | A link from an upstream recon to a downstream report | Core Recon → Daily P&L Report |
-| **Cycle** | A regression test run — executes definitions against file pairs | "Cycle 1 — Initial Comparison" |
-| **Run** | One execution of a definition against two files within a cycle | Core Trade Recon: 8,001 matched, 1,984 breaks |
+| **Project** | A workspace for one reconciliation exercise | "Murex MX 3.1.58 → 3.1.62 Upgrade" |
+| **File** | A CSV/XML data extract (Source A = old, Source B = new) | `core_recon_MX3158.csv` |
+| **Recon Template** | Reusable config: field mappings, match rules, tolerances | "Core Trade Recon" with 15 mapped fields |
+| **Explanation Key** | A tag for a known difference cause, with optional NL rule | `BOOTSTRAP_METHOD` — "IR curve bootstrap changed" |
+| **Dependency Edge** | Links an upstream recon to a downstream report | Core Recon → Daily P&L Report |
+| **Cycle** | A regression run — executes templates against file pairs | "Cycle 1 — Initial Comparison" |
+| **Run** | One template executed against two files | 8,001 matched, 1,984 breaks |
 
-**Key insight:** Definitions are *templates*, not tied to specific files. You define the field mappings and match rules once, then run the same template against different file pairs in each regression cycle.
+**Key insight:** Templates are reusable — define field mappings once, run against different files in every cycle. Explanation keys and their NL rules persist across all cycles.
 
 ---
 
-## Step-by-Step Walkthrough
+## Workflow: 5 Phases
 
-### 1. Create a Project
+The app has an interactive guide at **`/dashboard/guide`** with expandable details for each step.
 
-1. Sign in at `http://localhost:3000`
-2. Go to **Dashboard** → **Projects** → **New Project**
-3. Enter a name (e.g., "MX 3.1.58 → 3.1.62 Upgrade") and optional description
-4. Click **Create**
+### Phase 1: Setup
+1. **Create a project** → Dashboard → Projects → New
+2. **Upload files** → Source A (old system) + Source B (new system)
+3. **Create a recon template** → 3-step wizard: select files → auto-detect columns → map fields → name & save
+4. **Run the reconciliation** → Definition page → "Run Now" → pick files → go
 
-You'll land on the project overview with tabs: Overview, Files, Folders, Definitions, Dependencies, Explanation Keys, Cycles, Screenshots.
+### Phase 2: Discover
+5. **Click "Discover Patterns"** on the results page → AI clusters all breaks by similarity
+6. This is **analysis only** — it does NOT assign keys. It tells you what patterns exist.
 
-### 2. Upload Files
+### Phase 3: Define
+7. **Go to Explanation Keys** → create/edit keys
+8. **Write natural language rules** for each key based on what you discovered
+9. Rules persist across all future cycles in this project
 
-Go to the **Files** tab.
+### Phase 4: Apply
+10. **Click "Apply My Rules"** on the results page → AI reads your NL rules and assigns keys
+11. Multiple keys per break supported (e.g., BOOTSTRAP_METHOD + DAYCOUNT_CONV)
+12. Each assignment includes confidence % and per-field reasoning
+13. **Export to CSV** for offline review
 
-1. Select the file role: **Source A** (old system / before) or **Source B** (new system / after)
-2. Drag and drop a CSV/XML file into the upload zone, or click to browse
-3. The file is parsed immediately — headers detected, row count shown
-4. Repeat for as many files as needed
+### Phase 5: Repeat
+14. **Next cycle** → upload new files → run same template → click "Apply My Rules" → done in minutes
+15. **Propagate** → push explanation keys from core/sensitivity to downstream reports
+16. Only investigate NEW patterns that don't match existing rules
 
-**Supported formats:** `.csv`, `.xml`, `.tsv`
-
-**File roles:**
-- **Source A** = the "before" / old system / baseline
-- **Source B** = the "after" / new system / upgraded
-
-> **Tip:** You can also use the **Folders** tab to point to two directories on your machine. The system auto-discovers files, matches them by name, and bulk-imports them.
-
-### 3. Create a Recon Template (Definition)
-
-Go to the **Definitions** tab → **New Recon Template**.
-
-This is a 3-step wizard:
-
-#### Step 1: Select Files
-
-Choose your mode:
-- **Upload New Files** — pick CSV files directly from your machine. Headers are parsed instantly in-browser (no server round-trip needed).
-- **Use Existing Files** — select from files already uploaded to the project.
-
-Two buttons appear:
-- **AI Suggest Mappings** — Claude analyzes both files' column names and suggests mappings using financial domain knowledge. Works even when column names are completely different (e.g., `MtM_Value` → `mark_to_market`).
-- **Auto-Detect Columns & Map** — simple name-matching algorithm. Fast, works when column names are identical or very similar.
-
-#### Step 2: Map Fields
-
-A table appears with all detected field mappings:
-
-| Column | Purpose |
-|--------|---------|
-| **Key** (checkbox) | Mark this field as a row-matching key (e.g., `trade_id`, `portfolio`) |
-| **Source A Field** | Column name from file A |
-| **Source B Field** | Column name from file B |
-| **Match Type** | `Text` (exact/case-insensitive), `Number` (with tolerance), `Date`, or `Regex` |
-| **Tolerance** | For number fields: the acceptable difference (e.g., `0.01`) |
-| **Tolerance Type** | `Absolute` ($0.01), `Percentage` (1%), or `Basis Points` (100bp) |
-
-You can add, remove, or edit any mapping. Key fields are used to match rows between the two files — typically `trade_id` + `portfolio`.
-
-#### Step 3: Name & Save
-
-- **Template Name** — e.g., "Core Trade Reconciliation"
-- **Description** — what this template reconciles
-- **Category** — `Core Reconciliation`, `Sensitivity`, or `Downstream Report`
-- **Department / Asset Class** — e.g., "IR", "FX", "Market Risk", "Finance"
-
-Click **Create Template**. Files are uploaded, the definition is saved, and all field mappings are persisted.
-
-### 4. Set Up Explanation Keys
-
-Go to the **Explanation Keys** tab → **New Key**.
-
-Explanation keys are reusable labels that describe *why* a reconciliation break occurred. When you investigate a break and determine the root cause, you assign a key.
-
-**Fields when creating a key:**
-
-| Field | Required | Example |
-|-------|----------|---------|
-| **Code** | Yes | `BOOTSTRAP_METHOD` |
-| **Label** | Yes | "IR Curve Bootstrap Methodology Change" |
-| **Description** | No | "MX 3.1.62 uses improved piecewise cubic Hermite interpolation..." |
-| **Color** | No | Pick from presets or enter hex (e.g., `#3b82f6`) |
-| **Auto-Match Pattern** | No | Rules to auto-apply this key (see below) |
-
-**Auto-Match Pattern** (optional, for automatic assignment):
-- **Field Name** — which column to check (e.g., `market_value`)
-- **Diff Range Min / Max** — numeric difference bounds (e.g., `-500` to `500`)
-- **Value A Pattern** — regex to match Source A values
-- **Value B Pattern** — regex to match Source B values
-
-When a reconciliation runs, any break matching an auto-match pattern gets this key assigned automatically.
-
-### 5. Configure Dependencies
-
-Go to the **Dependencies** tab.
-
-This is the three-panel command center:
-
-**Left panel — Tree Browser:**
-- Definitions grouped by category: Core → Sensitivity → Downstream (by department)
-- Each item shows a status dot (green = no breaks, red = has breaks) and break count
-- Click to select a definition
-
-**Center panel — Lineage Visualizer:**
-- Shows the selected definition's upstream and downstream connections
-- Click nodes to navigate the dependency tree
-
-**Right panel — Summary:**
-- Stats for the selected definition
-- Explanation key breakdown
-- **AI Suggest Dependencies** button (for downstream definitions)
-
-**To add a dependency manually:**
-1. Click **Add Dependency** in the toolbar
-2. Select the **Parent** (upstream, e.g., "Core Trade Recon")
-3. Select the **Child** (downstream, e.g., "Daily P&L Report")
-4. Configure field mappings: which fields connect them (e.g., `trade_id → trade_id`)
-5. Click **Add Edge**
-
-**What dependencies do:** After you explain breaks in a core/sensitivity recon, click **Propagate All** to auto-attribute matching downstream breaks. If an FX delta difference is explained in your FX Sensitivity recon, the same explanation flows to all downstream reports that show the same FX delta difference.
-
-### 6. Run a Reconciliation Cycle
-
-Go to the **Cycles** tab → **New Cycle**.
-
-1. Give it a name (e.g., "Cycle 1 — Initial Comparison")
-2. Click **Create**
-3. Open the cycle
-
-You have two options:
-
-**Option A: Run All (Default Files)**
-- Runs every definition using its saved default file pair
-- Good for batch execution after initial setup
-
-**Option B: Run with Files**
-- Opens a dialog where you select:
-  - **Recon Template** — which definition to use
-  - **Source A File** — the old/before file
-  - **Source B File** — the new/after file
-- Click **Run Reconciliation**
-- This is the key feature: same template, different files each cycle
-
-Runs are grouped by category: **Core** → **Sensitivity** → **Downstream**. Each shows:
-- Definition name and department
-- Files compared (file A → file B)
-- Status (pending/processing/completed/failed)
-- Match / Break / Explained counts with a progress bar
-
-### 7. Review Results
-
-Click the arrow icon on a completed run to open the results page.
-
-**What you see:**
-
-**Header:** Definition name, category badge, department, source file names with row counts.
-
-**Summary cards:** Total Rows, Matched (green), Breaks (red), Explained (amber), Unexplained (orange).
-
-**Filter bar:**
-- Search by row key (e.g., `MX00150`)
-- Filter by status: All, Match, Break, Missing A, Missing B
-- Filter by explanation key
-- **AI Break Analysis** button (see AI Features below)
-- **AI Insights** panel (explain selected, generate summary)
-
-**Results table:**
-- Each row: checkbox, expand arrow, row key, status badge, explanation key
-- Click a row to expand and see all field-level comparisons (Value A, Value B, Diff, Match/No Match)
-- For break rows without a key: sparkles icon for **AI Key Suggestion**
-
-**Bulk actions:** Select multiple rows → choose an explanation key → click **Assign Key** to tag them all at once.
-
-### 8. AI Features
-
-Four AI capabilities powered by Claude:
-
-#### AI Break Pattern Analyst
-**Where:** Results page → **AI Break Analysis** button
-
-Analyzes ALL breaks holistically to identify clusters and patterns. Instead of reviewing 2,000 breaks one by one, get a summary like:
-> "399 breaks (20%) are IR products where DV01 shifted 2-5% — consistent with bootstrap methodology change. 339 breaks are options where vega shifted 8-15% — vol surface interpolation change. 5 anomalies with >$500K diffs don't correlate with any sensitivity shift."
-
-Click **Apply All Suggestions** to batch-assign explanation keys to each cluster.
-
-#### AI Field Mapping
-**Where:** Definition wizard → Step 1 → **AI Suggest Mappings** button
-
-When column names differ between systems (e.g., `MtM_Value` vs `mark_to_market`), AI maps them using financial domain knowledge. Handles common abbreviations: MtM = Mark to Market, Cpty = Counterparty, DV01 = Dollar Value of 01, etc.
-
-#### Smart Explanation Key Suggestion
-**Where:** Results table → sparkles icon on each break row
-
-Click the sparkles icon on any unassigned break. AI examines the specific field differences, product type, and asset class, then suggests the best explanation key with a confidence percentage and reasoning.
-
-#### Intelligent Dependency Suggestion
-**Where:** Dependencies tab → select a downstream definition → **AI Suggest Dependencies**
-
-AI analyzes the downstream report's columns and identifies which core/sensitivity recons it likely depends on. Shows shared columns and confidence per suggestion. Click **Accept** to create the edge.
+> **First cycle: ~2 hours** (discover + write rules). **Every subsequent cycle: ~2 minutes** (upload + run + apply).
 
 ---
 
-## Pre-Configured Explanation Keys
+## AI Features
 
-The seed data includes 14 explanation keys representing realistic causes of differences during a Murex system upgrade:
+### 1. Discover Patterns
+**Where:** Results page → **"Discover Patterns"** button
 
-| Code | Label | Typical Impact | Asset Classes |
-|------|-------|---------------|---------------|
-| `BOOTSTRAP_METHOD` | IR Curve Bootstrap Methodology Change | DV01 shifts 2-5%, MV proportional | IR |
-| `VOL_SURFACE_INTERP` | Volatility Surface Interpolation Change | Vega shifts 8-15%, option MV follows | FX, EQ, COM |
-| `DAYCOUNT_CONV` | Day Count Convention Correction | Small PnL/cash diffs on GBP products | IR |
-| `FX_RATE_SOURCE` | FX Fixing Source Change | FX delta and cross-currency basis diffs | FX |
-| `SETTLEMENT_DATE` | Settlement Date Handling Fix | Cash timing between past/future buckets | IR, FX |
-| `ROUNDING_PRECISION` | Rounding Precision Increase | Sub-cent diffs (<$0.05) everywhere | All |
-| `BARRIER_ENGINE` | Barrier Option Pricing Engine Upgrade | Large MV and Greek diffs on barriers | FX, EQ |
-| `CURVE_STRIPPING` | OIS Discounting Curve Stripping | DV01 and MV on IR products | IR |
-| `THETA_CALC` | Theta Calculation Method Change | Theta diffs on options (sticky delta vs strike) | FX, EQ, COM |
-| `QUANTO_CORR` | Quanto Correlation Surface Update | MV and delta on quanto products | FX |
-| `REPO_ACCRUAL` | Repo Accrual Methodology Change | Past cash and settled cash on repos | IR |
-| `COMMODITY_CURVE` | Commodity Forward Curve Construction | Commodity delta and forward prices | COM |
-| `XVA_MODEL` | XVA Model Recalibration | XVA P&L components | All |
-| `TRADE_POPULATION` | Trade Population Difference | Trades in source but not target (or vice versa) | All |
+Pure analysis — clusters breaks by similarity without assigning keys.
 
-### How to Define New Explanation Keys
+- Identifies groups like "30 IR trades where DV01 shifted 2-5%"
+- Per-field evidence: which fields changed, direction, magnitude
+- Flags anomalies that don't fit any cluster
+- **Does NOT assign keys** — this is for understanding your data
 
-1. Go to your project → **Explanation Keys** tab
-2. Click **New Key**
-3. Fill in:
-   - **Code**: Short uppercase identifier (e.g., `NEW_FEE_CALC`)
-   - **Label**: Human-readable name (e.g., "Fee Calculation Methodology Change")
-   - **Description**: Explain when this key applies and why the difference occurs
-   - **Color**: Pick a color for visual identification in the results table
-4. Optionally set an **Auto-Match Pattern**:
-   - If you know the difference always appears in the `fee_amount` field with a diff between -10 and 10:
-     - Field Name: `fee_amount`
-     - Diff Range Min: `-10`
-     - Diff Range Max: `10`
-   - This causes the key to auto-assign during reconciliation runs
-5. Click **Create**
+### 2. Apply My Rules (NLR)
+**Where:** Results page → **"Apply My Rules"** button
 
-The key is now available for:
-- Manual assignment on the results page (dropdown per row or bulk assign)
-- Auto-assignment during reconciliation (if auto-match pattern is set)
-- AI suggestions (the AI considers all available keys when making recommendations)
+Reads your natural language rules on explanation keys and assigns them to breaks.
+
+- Evaluates each break against ALL your rules
+- Assigns **multiple keys** per break when applicable
+- Each assignment has confidence % and per-field reasoning
+- Stores in the multi-key junction table (`result_explanation_keys`)
+
+**The difference from Discover Patterns:**
+- Discover Patterns = "I don't know what's happening — AI, what patterns do you see?"
+- Apply My Rules = "I've written rules — AI, read MY rules and apply them"
+
+### 3. AI Field Mapping
+**Where:** Definition wizard → Step 1 → **"AI Suggest Mappings"** button
+
+When column names differ between systems, AI maps them using financial domain knowledge:
+- `MtM_Value` → `mark_to_market`
+- `Counterparty_Code` → `cpty`
+- `DV01_Par_Sens` → `ir_sensitivity_bp`
+
+### 4. AI Key Suggestion per Row
+**Where:** Results table → sparkles icon on each unassigned break row
+
+Click to get a per-row suggestion with confidence and reasoning:
+> "DV01_par shifted from 1234.5 to 1271.2 (3% increase), market_value moved proportionally. This matches BOOTSTRAP_METHOD. Confidence: 92%."
+
+### 5. AI Dependency Suggestion
+**Where:** Dependencies tab → select a downstream definition → **"AI Suggest Dependencies"**
+
+AI analyzes a downstream report's columns and identifies which core/sensitivity recons it depends on:
+> "This report contains dv01_par and fx_delta → depends on Core Recon + IR Sensitivity + FX Sensitivity."
 
 ---
 
-## Demo Data for Testing
+## Explanation Keys
 
-### Pre-Seeded Database (`npm run seed`)
-- 10,000 trades across 25 typologies (IRS, FX Options, Equity, Commodities, etc.)
-- 80% match rate, 20% breaks with realistic patterns
-- 30 reconciliation definitions (1 core + 4 sensitivity + 25 downstream)
-- 14 explanation keys
-- Dependency tree connecting everything
-- 1 regression cycle with core recon executed
+### Natural Language Rules
 
-### Small Test Files (`npx tsx scripts/generate-test-files.ts`)
-Files in `test-data/` — 50-200 rows each, openable in Excel:
+The primary way to define when a key should apply. Write rules in plain English:
 
-| File Pair | Rows | Purpose |
-|-----------|------|---------|
-| `core_source/target_MX3158/62.csv` | 200 | Core trade recon with ~40 breaks |
-| `ir_sensi_source/target.csv` | 100 | IR sensitivity (DV01/Vega) |
-| `eq_sensi_source/target.csv` | 50 | Equity sensitivity (Delta/Vega/Theta) |
-| `fx_sensi_source/target.csv` | 60 | FX sensitivity with Greeks |
-| `daily_pnl_source/target.csv` | 150 | Downstream P&L report |
-| `var_report_source/target.csv` | 100 | Downstream VaR report |
-| `frtb_sa_source/target.csv` | 80 | Regulatory FRTB SA report |
+> "For interest rate products (IRS, Bond, Deposit) where DV01 has shifted by 2-5% and market value moved proportionally, this is caused by the IR curve bootstrap methodology change from linear on zero rates to piecewise cubic Hermite interpolation."
 
-### AI Feature Demo Data (`npx tsx scripts/generate-demo-data.ts`)
-Four folders in `demo-data/`, each designed to showcase a specific AI capability:
+Rules can reference:
+- Product types (IRS, FX_Option, Barrier)
+- Currencies (GBP, EUR)
+- Field names and magnitudes (dv01_par shifted 2-5%)
+- Combinations of conditions (DV01 shifted AND MV proportional AND currency is GBP)
 
-| Folder | What It Demonstrates |
-|--------|---------------------|
-| `01_break_pattern_analyst/` | 500 trades with 4 clustered break patterns + 5 anomalies. AI should identify all clusters. |
-| `02_ai_field_mapping/` | Two files with completely different column names (Murex vs risk system). AI maps them. |
-| `03_smart_key_suggestion/` | 50 trades where each break has a unique fingerprint. AI suggests the right key per row. |
-| `04_dependency_suggestion/` | 5 downstream reports. AI analyzes columns to suggest upstream dependencies. |
+### Auto-Match Patterns
 
-Each folder has a `README.md` with step-by-step demo instructions.
+Optional deterministic rules (under "Advanced" in the edit form). Only work on a **single field**:
+- Field name: `market_value`
+- Diff range: -500 to 500
+
+For multi-field conditions, use natural language rules instead.
+
+### Multi-Key Assignment
+
+A single break can have multiple explanation keys. Example: a GBP IRS trade might have:
+- `BOOTSTRAP_METHOD` — because DV01 shifted 3.5%
+- `DAYCOUNT_CONV` — because PnL has a tiny GBP-specific diff
+
+Both keys appear as colored badges on the row. Hover for full label.
+
+### Pre-Configured Keys
+
+The demo project includes 10 keys with natural language rules:
+
+| Code | What It Detects |
+|------|----------------|
+| `BOOTSTRAP_METHOD` | DV01 shifted 2-5% on IR products, MV proportional |
+| `VOL_SURFACE_INTERP` | Vega shifted 8-15% on options, theta 3-8% |
+| `DAYCOUNT_CONV` | Tiny PnL diff on GBP products (<0.01% notional) |
+| `FX_RATE_SOURCE` | FX delta shifted 0.5-2% on FX products |
+| `SETTLEMENT_DATE` | Zero-sum cash shift (settled↓ = future↑), MV unchanged |
+| `ROUNDING_PRECISION` | All diffs < $0.05, any product |
+| `BARRIER_ENGINE` | Large MV change (>0.5% notional) on barrier options |
+| `CURVE_STRIPPING` | DV01 1-3%, zero DV01 shifts more than par |
+| `THETA_CALC` | Theta shifted 5-20%, delta/vega stable |
+| `DATA_QUALITY` | Huge MV diff with no sensitivity correlation |
+
+---
+
+## Running the Demos
+
+All demo data is in the `demo-data/` folder. Each subfolder has a README with detailed instructions.
+
+### Prerequisites
+
+1. App running (`npm run dev`)
+2. Demo project created (`npx tsx scripts/seed-demo-project.ts`)
+3. Demo files generated (`npx tsx scripts/generate-demo-data.ts` and `npx tsx scripts/generate-nlr-demo.ts`)
+
+### Demo 1: Discover Patterns
+
+**Shows:** AI clustering breaks by similarity — pure discovery, no key assignment.
+
+**Files:** `demo-data/01_break_pattern_analyst/`
+
+| Step | Action |
+|------|--------|
+| 1 | Open **"AI Demo — MX Upgrade Recon"** project |
+| 2 | Go to **Definitions → New Recon Template** |
+| 3 | Upload `source_MX3158.csv` (Source A) and `target_MX3162.csv` (Source B) |
+| 4 | Click **"Auto-Detect Columns & Map"** |
+| 5 | Mark `trade_id` as key field (checkbox) |
+| 6 | Name: "Pattern Discovery Demo", Category: Core, click **Create** |
+| 7 | On definition page, scroll to **Run Now** → select the files → click **Run** |
+| 8 | On results page: ~95 breaks, all unassigned |
+| 9 | Click **"Discover Patterns"** |
+| 10 | AI shows clusters: IR DV01 shifts, option vega changes, rounding, anomalies |
+
+**What to highlight:** AI found 4-5 distinct patterns across 500 trades without any prior rules. Expand each cluster to see per-field evidence.
+
+### Demo 2: AI Field Mapping
+
+**Shows:** AI mapping columns with completely different names between systems.
+
+**Files:** `demo-data/02_ai_field_mapping/`
+
+| Step | Action |
+|------|--------|
+| 1 | Open any project → **Definitions → New Recon Template** |
+| 2 | Upload `murex_extract_MX3158.csv` (Source A) and `risk_system_extract.csv` (Source B) |
+| 3 | Note: column names are completely different (`TradeRef` vs `deal_id`, `MtM_Value` vs `mark_to_market`) |
+| 4 | Click **"AI Suggest Mappings"** |
+| 5 | AI maps all 13 columns correctly using financial domain knowledge |
+
+**What to highlight:** The AI knows that `MtM_Value` = `mark_to_market`, `Counterparty_Code` = `cpty`, `DV01_Par_Sens` = `ir_sensitivity_bp`. No configuration needed.
+
+### Demo 3: Natural Language Rule Assignment
+
+**Shows:** Writing rules in plain English, then AI applying them — including multi-key assignment.
+
+**Files:** `demo-data/05_nlr_assignment/`
+
+| Step | Action |
+|------|--------|
+| 1 | Open **"AI Demo — MX Upgrade Recon"** project |
+| 2 | Verify explanation keys have NL rules (Explanation Keys tab — "AI Rule" column should show text) |
+| 3 | Go to **Definitions → New Recon Template** |
+| 4 | Upload `nlr_source_MX3158.csv` and `nlr_target_MX3162.csv` |
+| 5 | Auto-detect columns, mark `trade_id` as key |
+| 6 | Name: "NLR Demo", save and **Run Now** |
+| 7 | Results: **56 breaks, ALL unassigned** (no auto-match patterns fire) |
+| 8 | Click **"Apply My Rules"** |
+| 9 | AI reads all 10 NL rules and assigns keys to each break |
+| 10 | Some trades show **two colored badges** (multi-key: BOOTSTRAP + DAYCOUNT) |
+
+**What to highlight:**
+- All 56 breaks assigned in one click
+- Multiple keys per trade (look for rows with 2 badges)
+- Expand rows to see AI's per-field reasoning
+- The `answer_key.csv` file can be used to verify AI correctness
+
+### Demo 4: Dependency Suggestion
+
+**Shows:** AI analyzing columns to suggest upstream dependencies for downstream reports.
+
+**Files:** `demo-data/04_dependency_suggestion/`
+
+| Step | Action |
+|------|--------|
+| 1 | Create definitions for: Core Recon, IR Sensitivity, EQ Sensitivity, FX Sensitivity, COM Sensitivity |
+| 2 | Upload each downstream report pair (Finance P&L, VaR, EQ Greeks, FRTB, Commodity Risk) |
+| 3 | Create definitions for each downstream report |
+| 4 | Go to **Dependencies** tab → select a downstream definition |
+| 5 | In the right panel, click **"AI Suggest Dependencies"** |
+| 6 | AI recommends: "VaR Report contains dv01_par and fx_delta → depends on Core + IR + FX" |
+| 7 | Click **Accept** to create dependency edges |
+
+### Demo 5: Full End-to-End
+
+**Shows:** The complete workflow from upload to propagation.
+
+**Files:** `test-data/` (7 file pairs: core, IR/EQ/FX sensitivities, daily P&L, VaR, FRTB)
+
+| Step | Action |
+|------|--------|
+| 1 | Create a new project |
+| 2 | Upload all 14 test files (7 Source A + 7 Source B) |
+| 3 | Create 7 recon templates (core + 3 sensitivities + 3 downstream) |
+| 4 | Create a cycle, run all templates |
+| 5 | On the core recon results: click **Discover Patterns** |
+| 6 | Go to Explanation Keys → write NL rules based on discoveries |
+| 7 | Go back to core results → click **Apply My Rules** |
+| 8 | Set up dependency edges (core → downstream reports) |
+| 9 | Click **Propagate All** on the cycle |
+| 10 | Check downstream reports — keys propagated from core |
+| 11 | **Export** results to CSV |
+
+---
+
+## Demo Data Reference
+
+### Generated Files
+
+| Folder | Files | Purpose | Script |
+|--------|-------|---------|--------|
+| `demo-data/01_break_pattern_analyst/` | 2 CSVs (500 trades) | Clustered patterns for Discover Patterns | `generate-demo-data.ts` |
+| `demo-data/02_ai_field_mapping/` | 2 CSVs (100 trades) | Different column names for AI mapping | `generate-demo-data.ts` |
+| `demo-data/03_smart_key_suggestion/` | 2 CSVs (50 trades) | Per-row key suggestion | `generate-demo-data.ts` |
+| `demo-data/04_dependency_suggestion/` | 12 CSVs (5 reports) | Dependency analysis | `generate-demo-data.ts` |
+| `demo-data/05_nlr_assignment/` | 2 CSVs + answer key (76 trades) | NLR rule assignment + multi-key | `generate-nlr-demo.ts` |
+| `test-data/` | 14 CSVs (50-200 rows each) | Manual testing, openable in Excel | `generate-test-files.ts` |
+
+### Seeded Database
+
+| Script | What It Creates |
+|--------|----------------|
+| `npm run seed` | 10K trades, 30 definitions, 14 keys (WITH auto-match), dependency tree, executed core recon |
+| `npx tsx scripts/seed-demo-project.ts` | Clean demo project, 10 keys (NO auto-match, WITH NL rules) — ideal for demos |
+
+### Regenerating
+
+```bash
+# Regenerate all demo files
+npx tsx scripts/generate-demo-data.ts
+npx tsx scripts/generate-nlr-demo.ts
+npx tsx scripts/generate-test-files.ts
+
+# Reseed the database
+npm run seed                              # Full 10K seed
+npx tsx scripts/seed-demo-project.ts      # Clean demo project
+```
 
 ---
 
@@ -367,13 +368,14 @@ Each folder has a `README.md` with step-by-step demo instructions.
 | Auth | Clerk |
 | AI | Claude API (@anthropic-ai/sdk) |
 | Graph Viz | React Flow (@xyflow/react) |
+| Tables | @tanstack/react-table |
 | File Parsing | papaparse (CSV) + fast-xml-parser (XML) |
 
 ---
 
 ## Environment Variables
 
-Create `.env.local` with:
+Create `.env.local`:
 
 ```bash
 # Database (PostgreSQL)
@@ -392,8 +394,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 AI_MODEL=claude-sonnet-4-20250514
 
 # Optional
-AI_CACHE_TTL_HOURS=24        # Cache AI responses (default 24h)
-RECON_CHUNK_SIZE=5000         # Rows per processing chunk (default 5000)
+AI_CACHE_TTL_HOURS=24
+RECON_CHUNK_SIZE=5000
 ```
 
 ---
@@ -402,13 +404,14 @@ RECON_CHUNK_SIZE=5000         # Rows per processing chunk (default 5000)
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Start dev server with Turbopack |
+| `npm run dev` | Start dev server (Turbopack) |
 | `npm run build` | Production build |
-| `npm run seed` | Seed database with 10K Murex demo trades |
+| `npm run seed` | Seed DB with 10K Murex trades |
 | `npm run db:push` | Push Drizzle schema to PostgreSQL |
-| `npm run db:generate` | Generate Drizzle migrations |
-| `npx tsx scripts/generate-test-files.ts` | Generate small test CSVs in `test-data/` |
-| `npx tsx scripts/generate-demo-data.ts` | Generate AI demo data in `demo-data/` |
+| `npx tsx scripts/seed-demo-project.ts` | Create clean demo project (no auto-match) |
+| `npx tsx scripts/generate-test-files.ts` | Generate small test CSVs |
+| `npx tsx scripts/generate-demo-data.ts` | Generate AI feature demo data |
+| `npx tsx scripts/generate-nlr-demo.ts` | Generate NLR assignment demo data |
 
 ---
 
@@ -416,52 +419,47 @@ RECON_CHUNK_SIZE=5000         # Rows per processing chunk (default 5000)
 
 ```
 black-glass-ai-recon/
-├── app/                          # Next.js App Router pages
-│   ├── dashboard/                # Authenticated application
-│   │   ├── projects/             # Project management
+├── app/
+│   ├── dashboard/
+│   │   ├── guide/                # Interactive workflow guide (10 steps)
+│   │   ├── projects/
 │   │   │   └── [projectId]/      # Project detail (8 tabs)
 │   │   │       ├── files/        # File upload & preview
 │   │   │       ├── folders/      # Folder scanner & auto-import
-│   │   │       ├── definitions/  # Recon template CRUD + 3-step wizard
+│   │   │       ├── definitions/  # Recon template wizard + Run Now
 │   │   │       ├── dependencies/ # 3-panel command center
-│   │   │       ├── explanation-keys/ # Key management
-│   │   │       ├── cycles/       # Regression cycles
-│   │   │       │   └── [cycleId]/
-│   │   │       │       ├── runs/ # Results with AI features
-│   │   │       │       └── compare/ # Cross-cycle comparison
+│   │   │       ├── explanation-keys/ # Keys with NL rules
+│   │   │       ├── cycles/       # Regression cycles + results
 │   │   │       └── screenshots/  # Visual comparison
-│   │   └── settings/             # Clerk account management
-│   ├── sign-in/                  # Clerk sign-in
-│   └── sign-up/                  # Clerk sign-up
+│   │   └── settings/             # Account management (Clerk)
+│   ├── sign-in/ & sign-up/      # Clerk authentication
 ├── actions/                      # Server actions
-│   ├── ai-actions.ts             # All AI features (4 analyzers)
-│   ├── runs-actions.ts           # Run execution with file selection
-│   ├── dependency-actions.ts     # Graph + propagation + lineage
-│   └── ...                       # CRUD for all entities
+│   ├── ai-actions.ts             # 5 AI features + NLR assignment
+│   ├── runs-actions.ts           # Run execution (files per-run)
+│   └── dependency-actions.ts     # Graph, lineage, propagation
 ├── components/
-│   ├── ai/                       # AI feature components
-│   │   ├── break-analysis-panel.tsx
-│   │   ├── key-suggestion-inline.tsx
+│   ├── ai/                       # AI UI components
+│   │   ├── break-analysis-panel.tsx  # Discover Patterns
+│   │   ├── key-suggestion-inline.tsx # Per-row suggestion
 │   │   └── dependency-suggestion-panel.tsx
-│   ├── dependency/               # 3-panel command center components
+│   ├── dependency/               # 3-panel command center
 │   └── ui/                       # Shadcn/UI components
 ├── lib/
 │   ├── recon/                    # Core reconciliation engine
 │   │   ├── engine.ts             # Orchestrator
-│   │   ├── matchers/             # Text/Number/Date/Regex matchers
-│   │   ├── parsers/              # CSV/XML parsers
-│   │   ├── dependency-propagator.ts # DAG traversal
-│   │   └── folder-scanner.ts     # File discovery
+│   │   ├── matchers/             # Text/Number/Date/Regex
+│   │   └── parsers/              # CSV/XML
 │   ├── ai/                       # Claude API integration
-│   │   ├── break-pattern-analyst.ts
-│   │   ├── field-mapping-suggest.ts
-│   │   ├── explanation-key-suggester.ts
-│   │   └── dependency-suggester.ts
-│   └── streaming/                # Chunked processing for large files
-├── db/schema/                    # 12 Drizzle ORM table schemas
+│   └── streaming/                # Chunked processing (100K+ rows)
+├── db/schema/                    # 13 Drizzle ORM tables
 ├── scripts/                      # Seed & demo data generators
 ├── test-data/                    # Small test CSVs (50-200 rows)
-└── demo-data/                    # AI feature demo folders with READMEs
+└── demo-data/                    # 5 AI feature demo folders
+    ├── 01_break_pattern_analyst/
+    ├── 02_ai_field_mapping/
+    ├── 03_smart_key_suggestion/
+    ├── 04_dependency_suggestion/
+    └── 05_nlr_assignment/
 ```
 
 ---
