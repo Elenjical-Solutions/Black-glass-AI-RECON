@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Sparkles,
   Settings,
+  BookOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -19,6 +20,7 @@ import { useState } from "react"
 const mainNav = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", href: "/dashboard/projects", icon: FolderKanban },
+  { label: "Guide", href: "/dashboard/guide", icon: BookOpen },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ]
 
