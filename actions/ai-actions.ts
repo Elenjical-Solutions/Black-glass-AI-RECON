@@ -882,6 +882,30 @@ export async function aiAssignByNaturalLanguageRulesAction(
       })
     }
 
+    // Update the run summary with new explained count
+    const explainedCount = await db
+      .select()
+      .from(reconciliationResultsTable)
+      .where(
+        and(
+          eq(reconciliationResultsTable.runId, runId),
+          eq(reconciliationResultsTable.status, "break")
+        )
+      )
+      .then(rows => rows.filter(r => r.explanationKeyId !== null).length)
+
+    const currentSummary = (run.summary as any) ?? {}
+    await db
+      .update(reconciliationRunsTable)
+      .set({
+        summary: {
+          ...currentSummary,
+          explained: explainedCount,
+          unexplained: (currentSummary.breaks ?? totalBreaks) - explainedCount,
+        }
+      })
+      .where(eq(reconciliationRunsTable.id, runId))
+
     return {
       status: "success",
       data: {

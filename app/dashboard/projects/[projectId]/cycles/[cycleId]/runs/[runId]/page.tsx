@@ -371,12 +371,16 @@ export default function RunResultsPage({
     }
   }
 
+  // Summary: prefer live data from run.summary (which gets updated after AI assignment)
   const summary = run?.summary as any
   const totalRows = summary?.totalRows ?? total
   const matched = summary?.matched ?? 0
   const breaks = summary?.breaks ?? 0
-  const explained = summary?.explained ?? 0
-  const unexplained = breaks - explained
+  // Compute explained from current page results as a live indicator
+  const explainedFromResults = results.filter(r => r.status === "break" && (r.explanationKey || r.aiExplanation)).length
+  // Use the larger of: DB summary explained count, or live page count
+  const explained = Math.max(summary?.explained ?? 0, explainedFromResults)
+  const unexplained = Math.max(0, breaks - explained)
   const totalPages = Math.ceil(total / 50)
 
   if (loading && !run) {
