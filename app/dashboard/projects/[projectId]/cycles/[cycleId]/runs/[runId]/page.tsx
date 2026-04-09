@@ -11,6 +11,7 @@ import {
 import { getExplanationKeysAction } from "@/actions/explanation-keys-actions"
 import { explainDifferencesAction, generateSummaryAction, aiAssignByNaturalLanguageRulesAction } from "@/actions/ai-actions"
 import { BreakAnalysisPanel } from "@/components/ai/break-analysis-panel"
+import { ExcelExport } from "@/components/recon/excel-export"
 import { KeySuggestionInline } from "@/components/ai/key-suggestion-inline"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -697,10 +698,21 @@ export default function RunResultsPage({
         <div className="p-4 border-b border-border/50 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-lg font-semibold">Results ({total})</h3>
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={handleExportCSV}>
-              <Download className="h-3.5 w-3.5" />
-              Export CSV
-            </Button>
+            <ExcelExport
+              runId={runId}
+              definitionName={context?.definition.name ?? "Reconciliation"}
+              category={context?.definition.category ?? null}
+              department={context?.definition.department ?? null}
+              fileAName={context?.fileA?.filename ?? null}
+              fileBName={context?.fileB?.filename ?? null}
+              totalRows={totalRows}
+              matched={matched}
+              breaks={breaks}
+              explained={explained}
+              unexplained={unexplained}
+              explanationKeys={explanationKeys}
+              fieldMappingNames={context?.fieldMappingNames ?? {}}
+            />
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-2 text-sm">
