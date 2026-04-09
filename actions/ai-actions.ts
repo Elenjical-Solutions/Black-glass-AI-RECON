@@ -785,46 +785,58 @@ export async function aiAssignByNaturalLanguageRulesAction(
 
     const systemPrompt =
       "You are a senior financial reconciliation analyst. You are given:\n" +
-      "1. A set of explanation keys, each with a NATURAL LANGUAGE RULE describing when it should apply.\n" +
-      "2. A set of reconciliation breaks, each with field-by-field differences.\n\n" +
-      "Your job: For each break, evaluate ALL rules and assign EVERY key that applies. " +
-      "A single break CAN have MULTIPLE keys (e.g., an IRS trade might have both a bootstrapping change AND a daycount correction).\n\n" +
-      "For each assignment, provide:\n" +
-      "- The key code\n" +
-      "- Confidence (0-100)\n" +
-      "- Reasoning: explain per-field WHY this rule matches, referencing specific field names and values\n\n" +
-      "If NO rule matches a break, still include it with an empty assignments array.\n\n" +
-      "Return JSON:\n" +
-      '{\n  "assignments": [\n    {\n      "trade_id": "...",\n' +
-      '      "keys": [\n        { "keyCode": "...", "confidence": 85, "reasoning": "DV01_par shifted from 1234.5 to 1271.2 (3% increase), market_value moved proportionally. This matches the bootstrap methodology rule for IR products." }\n' +
-      '      ]\n    }\n  ],\n  "summary": "Overall summary of the assignment run"\n}'
-
-    const userMessage =
-      `Reconciliation: ${definition?.name ?? "Unknown"}\n` +
-      `Total breaks: ${totalBreaks}, Analyzed: ${breakResults.length}\n\n` +
-      `=== EXPLANATION KEY RULES ===\n${keyRulesForAI.map(k => `[${k.code}] ${k.label}\nRule: ${k.rule}`).join("\n\n")}\n\n` +
-      `=== BREAKS ===\n${JSON.stringify(breaksForAI, null, 2)}`
+      "1. A set of explanation keys, each with a NATURAL LANGUAGE RULE.\n" +
+      "2. A set of reconciliation breaks with field differences.\n\n" +
+      "For each break, assign EVERY key whose rule matches. A break CAN have multiple keys.\n\n" +
+      "For each assignment provide:\n" +
+      "- keyCode: the key code\n" +
+      "- confidence: 0-100\n" +
+      "- reasoning: ONE sentence explaining why (reference specific field names and diff values)\n\n" +
+      "IMPORTANT: Keep reasoning to ONE concise sentence per assignment. Do NOT include breaks with no matching keys.\n\n" +
+      'Return JSON: { "assignments": [{ "trade_id": "...", "keys": [{ "keyCode": "...", "confidence": 85, "reasoning": "..." }] }] }'
 
     const client = getAIClient()
-    const response = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    })
-
-    const text = response.content[0].type === "text" ? response.content[0].text : ""
-    const parsed = parseJsonFromResponse(text)
-
-    // Build a map of resultId by trade_id
     const resultIdByTradeId = new Map(breakResults.map(r => [r.rowKeyValue, r.id]))
     const keyIdByCode = new Map(keys.map(k => [k.code, k.id]))
+
+    // Process in batches of 20 breaks to avoid token limit issues
+    const BATCH_SIZE = 20
+    const allParsedAssignments: Array<{ trade_id: string; keys: Array<{ keyCode: string; confidence: number; reasoning: string }> }> = []
+
+    for (let batchStart = 0; batchStart < breaksForAI.length; batchStart += BATCH_SIZE) {
+      const batch = breaksForAI.slice(batchStart, batchStart + BATCH_SIZE)
+
+      const userMessage =
+        `Reconciliation: ${definition?.name ?? "Unknown"}\n` +
+        `Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(breaksForAI.length / BATCH_SIZE)}, ` +
+        `${batch.length} breaks\n\n` +
+        `=== RULES ===\n${keyRulesForAI.map(k => `[${k.code}] ${k.label}: ${k.rule}`).join("\n")}\n\n` +
+        `=== BREAKS ===\n${JSON.stringify(batch)}`
+
+      const response = await client.messages.create({
+        model: DEFAULT_MODEL,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+      })
+
+      const text = response.content[0].type === "text" ? response.content[0].text : ""
+      try {
+        const parsed = parseJsonFromResponse(text)
+        if (parsed.assignments) {
+          allParsedAssignments.push(...parsed.assignments)
+        }
+      } catch (parseErr: any) {
+        console.error(`NLR batch ${batchStart / BATCH_SIZE + 1} parse error:`, parseErr.message)
+        // Continue with other batches even if one fails
+      }
+    }
 
     // Insert assignments into junction table
     let totalAssigned = 0
     const nlrAssignments: NLRAssignment[] = []
 
-    for (const item of (parsed.assignments ?? [])) {
+    for (const item of allParsedAssignments) {
       const resultId = resultIdByTradeId.get(item.trade_id)
       if (!resultId) continue
 
@@ -874,7 +886,7 @@ export async function aiAssignByNaturalLanguageRulesAction(
       status: "success",
       data: {
         assignments: nlrAssignments,
-        summary: parsed.summary ?? `Assigned ${totalAssigned} keys across ${nlrAssignments.length} breaks using natural language rules.`,
+        summary: `Assigned ${totalAssigned} keys across ${nlrAssignments.length} breaks using natural language rules (${Math.ceil(breaksForAI.length / BATCH_SIZE)} batches).`,
         totalAssigned,
         totalBreaksProcessed: breakResults.length,
       }
