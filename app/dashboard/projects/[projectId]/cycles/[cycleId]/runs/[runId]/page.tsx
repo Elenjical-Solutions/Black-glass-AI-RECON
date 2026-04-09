@@ -542,9 +542,10 @@ export default function RunResultsPage({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Keys</SelectItem>
+              <SelectItem value="__unassigned">Unassigned Only</SelectItem>
               {explanationKeys.map(k => (
                 <SelectItem key={k.id} value={k.id}>
-                  {k.label}
+                  {k.code}
                 </SelectItem>
               ))}
             </SelectContent>

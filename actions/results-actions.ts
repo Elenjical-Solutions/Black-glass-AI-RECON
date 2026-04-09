@@ -37,12 +37,18 @@ export async function getResultsAction(
     }
 
     if (filters?.explanationKeyId) {
-      conditions.push(
-        eq(
-          reconciliationResultsTable.explanationKeyId,
-          filters.explanationKeyId
+      if (filters.explanationKeyId === "__unassigned") {
+        conditions.push(
+          sql`${reconciliationResultsTable.explanationKeyId} IS NULL`
         )
-      )
+      } else {
+        conditions.push(
+          eq(
+            reconciliationResultsTable.explanationKeyId,
+            filters.explanationKeyId
+          )
+        )
+      }
     }
 
     if (filters?.search) {
