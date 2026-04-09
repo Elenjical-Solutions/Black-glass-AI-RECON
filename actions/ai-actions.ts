@@ -869,7 +869,7 @@ export async function aiAssignByNaturalLanguageRulesAction(
             .update(reconciliationResultsTable)
             .set({
               explanationKeyId: primaryKeyId,
-              aiExplanation: assignments.map(a => `[${a.keyCode}] ${a.reasoning}`).join("\n\n"),
+              aiExplanation: assignments.map(a => `[${a.keyCode}:${a.confidence}%] ${a.reasoning}`).join("\n\n"),
             })
             .where(eq(reconciliationResultsTable.id, resultId))
         }

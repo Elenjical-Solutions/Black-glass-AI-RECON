@@ -792,33 +792,45 @@ export default function RunResultsPage({
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       {result.explanationKey || result.aiExplanation ? (
-                        <div className="flex flex-wrap gap-0.5 max-w-[220px]">
-                          {result.explanationKey && (
-                            <Badge
-                              style={{
-                                backgroundColor: `${result.explanationKey.color}20`,
-                                color: result.explanationKey.color ?? undefined,
-                                borderColor: `${result.explanationKey.color}40`
-                              }}
-                              className="text-[10px] px-1.5 py-0 h-5"
-                              title={result.explanationKey.label}
-                            >
-                              {result.explanationKey.code}
-                            </Badge>
-                          )}
-                          {result.aiExplanation && (() => {
-                            const codes = (result.aiExplanation as string).match(/\[([A-Z_]+)\]/g)
-                            if (!codes) return null
-                            const unique = [...new Set(codes.map(c => c.replace(/[\[\]]/g, "")))]
-                            const primary = result.explanationKey?.code
-                            return unique.filter(c => c !== primary).map(code => {
-                              const k = explanationKeys.find(ek => ek.code === code)
-                              return k ? (
-                                <Badge key={code}
-                                  style={{ backgroundColor: `${k.color}20`, color: k.color ?? undefined, borderColor: `${k.color}40` }}
-                                  className="text-[10px] px-1.5 py-0 h-5" title={k.label}
-                                >{code}</Badge>
-                              ) : null
+                        <div className="flex flex-wrap gap-0.5 max-w-[280px]">
+                          {(() => {
+                            // Parse all [CODE:confidence%] from aiExplanation
+                            const aiText = result.aiExplanation as string | null
+                            const entries: Array<{ code: string; confidence: string | null }> = []
+
+                            if (aiText) {
+                              const matches = aiText.matchAll(/\[([A-Z_]+)(?::(\d+)%)?\]/g)
+                              for (const m of matches) {
+                                entries.push({ code: m[1], confidence: m[2] ?? null })
+                              }
+                            }
+
+                            // If no AI entries but has primary key, show that
+                            if (entries.length === 0 && result.explanationKey) {
+                              entries.push({ code: result.explanationKey.code, confidence: null })
+                            }
+
+                            // Deduplicate
+                            const seen = new Set<string>()
+                            return entries.filter(e => {
+                              if (seen.has(e.code)) return false
+                              seen.add(e.code)
+                              return true
+                            }).map(entry => {
+                              const k = explanationKeys.find(ek => ek.code === entry.code) ?? result.explanationKey
+                              const color = k?.color ?? "#6366f1"
+                              return (
+                                <Badge key={entry.code}
+                                  style={{ backgroundColor: `${color}20`, color, borderColor: `${color}40` }}
+                                  className="text-[10px] px-1.5 py-0 h-5"
+                                  title={k ? `${(k as any).label ?? entry.code}${entry.confidence ? ` (${entry.confidence}% confidence)` : ""}` : entry.code}
+                                >
+                                  {entry.code}
+                                  {entry.confidence && (
+                                    <span className="ml-1 opacity-60">{entry.confidence}%</span>
+                                  )}
+                                </Badge>
+                              )
                             })
                           })()}
                         </div>
@@ -939,17 +951,22 @@ export default function RunResultsPage({
                                 AI Explanation
                               </p>
                               <div className="space-y-1.5">
-                                {(result.aiExplanation as string).split(/\n\n|\[/).filter(Boolean).map((chunk, ci) => {
-                                  const codeMatch = chunk.match(/^([A-Z_]+)\]\s*(.*)/)
+                                {(result.aiExplanation as string).split(/\n\n/).filter(Boolean).map((chunk, ci) => {
+                                  const codeMatch = chunk.match(/^\[([A-Z_]+)(?::(\d+)%)?\]\s*(.*)/)
                                   if (codeMatch) {
                                     const keyDef = explanationKeys.find(k => k.code === codeMatch[1])
+                                    const conf = codeMatch[2]
+                                    const color = keyDef?.color ?? "#6366f1"
                                     return (
                                       <div key={ci} className="flex gap-2 items-start">
                                         <Badge
-                                          style={{ backgroundColor: `${keyDef?.color ?? "#6366f1"}20`, color: keyDef?.color ?? undefined, borderColor: `${keyDef?.color ?? "#6366f1"}40` }}
+                                          style={{ backgroundColor: `${color}20`, color, borderColor: `${color}40` }}
                                           className="text-[10px] px-1.5 py-0 h-5 shrink-0 mt-0.5"
-                                        >{codeMatch[1]}</Badge>
-                                        <p className="text-xs text-muted-foreground whitespace-normal break-words">{codeMatch[2].trim()}</p>
+                                        >
+                                          {codeMatch[1]}
+                                          {conf && <span className="ml-1 opacity-60">{conf}%</span>}
+                                        </Badge>
+                                        <p className="text-xs text-muted-foreground whitespace-normal break-words">{codeMatch[3].trim()}</p>
                                       </div>
                                     )
                                   }
