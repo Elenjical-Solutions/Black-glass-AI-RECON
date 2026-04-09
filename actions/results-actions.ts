@@ -131,6 +131,37 @@ export async function getResultDetailsAction(
   }
 }
 
+/**
+ * Batch load field details for multiple results in ONE query.
+ * Returns a map: resultId -> fieldDetails[]
+ */
+export async function getBatchFieldDetailsAction(
+  resultIds: string[]
+): Promise<ActionState<Record<string, ResultFieldDetail[]>>> {
+  try {
+    if (resultIds.length === 0) {
+      return { status: "success", data: {} }
+    }
+
+    // Load all field details in one query
+    const allDetails = await db
+      .select()
+      .from(resultFieldDetailsTable)
+      .where(inArray(resultFieldDetailsTable.resultId, resultIds))
+
+    // Group by resultId
+    const grouped: Record<string, ResultFieldDetail[]> = {}
+    for (const fd of allDetails) {
+      if (!grouped[fd.resultId]) grouped[fd.resultId] = []
+      grouped[fd.resultId].push(fd)
+    }
+
+    return { status: "success", data: grouped }
+  } catch (error: any) {
+    return { status: "error", message: error.message }
+  }
+}
+
 export async function assignExplanationKeyAction(
   resultId: string,
   explanationKeyId: string | null

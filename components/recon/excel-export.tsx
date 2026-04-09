@@ -9,7 +9,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Download, Loader2 } from "lucide-react"
 import { toast } from "sonner"
-import { getResultsAction, getResultDetailsAction } from "@/actions/results-actions"
+import { getResultsAction, getBatchFieldDetailsAction } from "@/actions/results-actions"
 import type { ExplanationKey } from "@/db/schema/explanation-keys-schema"
 
 interface ExcelExportProps {
@@ -73,14 +73,19 @@ export function ExcelExport(props: ExcelExportProps) {
         } else { hasMore = false }
       }
 
-      // Load field details
-      toast.info(`Loading field details...`)
-      const fieldDetailsMap = new Map<string, any[]>()
-      for (const r of allResults.slice(0, 500)) {
-        const id = r.id ?? r.result?.id
-        if (!id) continue
-        const detail = await getResultDetailsAction(id)
-        if (detail.status === "success") fieldDetailsMap.set(id, detail.data.fieldDetails)
+      // Batch load ALL field details in one query
+      toast.info("Loading field details...")
+      const resultIds = allResults.map(r => r.id ?? r.result?.id).filter(Boolean) as string[]
+      let fieldDetailsMap = new Map<string, any[]>()
+      // Process in chunks of 500 IDs (Postgres parameter limit)
+      for (let i = 0; i < resultIds.length; i += 500) {
+        const chunk = resultIds.slice(i, i + 500)
+        const res = await getBatchFieldDetailsAction(chunk)
+        if (res.status === "success") {
+          for (const [k, v] of Object.entries(res.data)) {
+            fieldDetailsMap.set(k, v)
+          }
+        }
       }
 
       // Discover field names
