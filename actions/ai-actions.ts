@@ -238,56 +238,63 @@ export async function analyzeBreakPatternsAction(
 
     const totalTrades = allResults.length
 
-    // Build the structured data for AI
+    // Build the structured data for AI — include ALL fields (matched and unmatched)
+    // so AI can see typology, currency, asset_class for clustering
     const breaksForAI = breakResults.map(r => {
       const details = detailsByResult.get(r.id) ?? []
+      // Extract key attribute fields (typology, currency, asset_class) from matched fields
+      const allFields: Record<string, string> = {}
+      const diffs: Array<{ fieldName: string; valueA: string | null; valueB: string | null; numericDiff: number | null; isMatch: boolean }> = []
+      for (const d of details) {
+        const mapping = fieldMappingLookup.get(d.fieldMappingId)
+        const fieldName = mapping?.fieldNameA ?? d.fieldMappingId
+        allFields[fieldName] = d.valueA ?? ""
+        diffs.push({
+          fieldName,
+          valueA: d.valueA,
+          valueB: d.valueB,
+          numericDiff: d.numericDiff ? Number(d.numericDiff) : null,
+          isMatch: d.isMatch,
+        })
+      }
       return {
         trade_id: r.rowKeyValue,
-        typology: r.aiCategory ?? "unknown",
-        asset_class: definition?.category ?? "unknown",
-        currency: "N/A",
-        fieldDiffs: details.map(d => {
-          const mapping = fieldMappingLookup.get(d.fieldMappingId)
-          return {
-            fieldName: mapping
-              ? `${mapping.fieldNameA} / ${mapping.fieldNameB}`
-              : d.fieldMappingId,
-            valueA: d.valueA,
-            valueB: d.valueB,
-            numericDiff: d.numericDiff ? Number(d.numericDiff) : null,
-          }
-        }),
+        typology: allFields["typology"] ?? allFields["instrument_type"] ?? allFields["product_class"] ?? "unknown",
+        asset_class: allFields["asset_class"] ?? allFields["asset_type"] ?? "unknown",
+        currency: allFields["currency"] ?? allFields["ccy"] ?? "unknown",
+        portfolio: allFields["portfolio"] ?? allFields["book"] ?? "",
+        notional: allFields["notional"] ?? "",
+        fields: diffs,
       }
     })
 
-    const keysForAI = explanationKeys.map(k => ({
-      code: k.code,
-      label: k.label,
-      description: k.description,
-    }))
-
     const systemPrompt =
-      "You are a senior financial reconciliation analyst specializing in trading system upgrades (e.g., Murex MX.3). " +
-      "Your task is PURE PATTERN DISCOVERY — analyze ALL breaks to identify CLUSTERS of similar differences. " +
-      "Do NOT assign explanation keys or suggest root causes yet. Just describe what you observe.\n\n" +
-      "For each cluster you MUST provide:\n" +
-      "- name: short descriptive cluster label based on what you observe (e.g., 'IR DV01 Shift Group', 'Sub-Cent Rounding Group')\n" +
-      "- description: 2-3 sentences describing the observable pattern — which fields changed, by how much, on what products. Do NOT speculate on the root cause.\n" +
-      "- tradeCount: number of trades in this cluster\n" +
-      "- tradeIds: array of trade IDs in this cluster\n" +
-      "- avgDiff: average numeric difference across the key differentiating field\n" +
-      "- fieldEvidence: array of per-field observations, each with:\n" +
-      "  - fieldName: the column name\n" +
-      "  - observation: what you observe (e.g., 'dv01_par shifted by 2-5% consistently across all trades in this group')\n" +
-      "  - direction: 'increased' | 'decreased' | 'mixed' | 'unchanged'\n" +
-      "  - avgMagnitude: average absolute change in this field\n" +
-      "  - isKeyDriver: boolean — is this the primary field differentiating this cluster?\n\n" +
-      "Flag any ANOMALIES — breaks that don't fit into any cluster. For anomalies, explain per-field why they are unusual.\n\n" +
+      "You are a senior financial reconciliation analyst specializing in Murex MX.3 trading system upgrades.\n\n" +
+      "DOMAIN CONTEXT — Murex product hierarchy:\n" +
+      "- Family Groups: IRD (Interest Rate Derivatives), FXD (FX Derivatives), EQD (Equity Derivatives), CMD (Commodity Derivatives), CRD (Credit Derivatives)\n" +
+      "- Typologies: IRS, IR_Option, IR_Cap_Floor, Bond, Bond_Forward, Repo, Buy_Sell_Back, Deposit, Loan, Short_Paper, " +
+      "FX_Forward, FX_Swap, FX_Option, FX_Barrier_Option, FX_Future, Quanto, " +
+      "EQ_Option, EQ_Forward, EQ_Future, EQ_Barrier_Option, EQ_Average_Option, " +
+      "COM_Forward, COM_Swap, COM_Future, COM_Average_Option, Call_Account\n" +
+      "- Key metrics: market_value (MtM), pnl, past_cash, future_cash, settled_cash\n" +
+      "- Sensitivities: dv01_par, dv01_zero (IR), fx_delta (FX), eq_delta (EQ), com_delta (COM), vega, theta, gamma\n\n" +
+      "CLUSTERING STRATEGY — Group breaks by:\n" +
+      "1. First by TYPOLOGY/ASSET CLASS (e.g., all IRS trades, all FX options)\n" +
+      "2. Then by WHICH FIELDS changed and by HOW MUCH\n" +
+      "3. Consider CURRENCY as a sub-grouping factor (e.g., GBP-only diffs)\n" +
+      "4. Look for PROPORTIONAL patterns (e.g., DV01 shifted 2-5% AND MV moved proportionally)\n\n" +
+      "Your task is PURE PATTERN DISCOVERY. Do NOT assign explanation keys. Just describe what you observe.\n\n" +
+      "For each cluster provide:\n" +
+      "- name: descriptive label including the typology/asset class (e.g., 'IRS DV01 Shift — EUR/USD', 'FX Option Vega Change')\n" +
+      "- description: 2-3 sentences — which products, which fields, magnitude, currency pattern\n" +
+      "- tradeCount, tradeIds, avgDiff\n" +
+      "- fieldEvidence: per-field observations with fieldName, observation, direction, avgMagnitude, isKeyDriver\n\n" +
+      "Flag ANOMALIES that don't fit any cluster.\n\n" +
       "Return JSON: {\n" +
       '  "clusters": [{ "name", "description", "tradeCount", "tradeIds", "avgDiff", ' +
       '"fieldEvidence": [{ "fieldName", "observation", "direction", "avgMagnitude", "isKeyDriver" }] }],\n' +
       '  "anomalies": [{ "tradeId", "reason", "severity", "fieldDetails": [{ "fieldName", "valueA", "valueB", "observation" }] }],\n' +
-      '  "summary": string — overall summary of what patterns you found, how many breaks are clustered vs unclustered\n}'
+      '  "summary": string\n}'
 
     const userMessage =
       `Reconciliation: ${definition?.name ?? "Unknown"}\n` +
@@ -757,22 +764,33 @@ export async function aiAssignByNaturalLanguageRulesAction(
       }
     }
 
-    // Build break data for AI
+    // Build break data for AI — include ALL fields so AI can evaluate
+    // typology, currency, asset_class conditions in NL rules
     const breaksForAI = breakResults.map(r => {
       const details = detailsByResult.get(r.id) ?? []
-      return {
-        resultId: r.id,
-        trade_id: r.rowKeyValue,
-        fieldDiffs: details.map(d => {
-          const mapping = fmLookup.get(d.fieldMappingId)
-          return {
-            fieldName: mapping?.fieldNameA ?? d.fieldMappingId,
+      const allFields: Record<string, string> = {}
+      const diffs: Array<{ fieldName: string; valueA: string | null; valueB: string | null; numericDiff: number | null }> = []
+      for (const d of details) {
+        const mapping = fmLookup.get(d.fieldMappingId)
+        const fieldName = mapping?.fieldNameA ?? d.fieldMappingId
+        allFields[fieldName] = d.valueA ?? ""
+        if (!d.isMatch) {
+          diffs.push({
+            fieldName,
             valueA: d.valueA,
             valueB: d.valueB,
             numericDiff: d.numericDiff ? Number(d.numericDiff) : null,
-            isMatch: d.isMatch,
-          }
-        }).filter(d => !d.isMatch), // Only send non-matching fields
+          })
+        }
+      }
+      return {
+        resultId: r.id,
+        trade_id: r.rowKeyValue,
+        typology: allFields["typology"] ?? allFields["instrument_type"] ?? "unknown",
+        asset_class: allFields["asset_class"] ?? "unknown",
+        currency: allFields["currency"] ?? allFields["ccy"] ?? "unknown",
+        portfolio: allFields["portfolio"] ?? "",
+        fieldDiffs: diffs,
       }
     })
 
@@ -784,15 +802,19 @@ export async function aiAssignByNaturalLanguageRulesAction(
     }))
 
     const systemPrompt =
-      "You are a senior financial reconciliation analyst. You are given:\n" +
-      "1. A set of explanation keys, each with a NATURAL LANGUAGE RULE.\n" +
-      "2. A set of reconciliation breaks with field differences.\n\n" +
-      "For each break, assign EVERY key whose rule matches. A break CAN have multiple keys.\n\n" +
-      "For each assignment provide:\n" +
-      "- keyCode: the key code\n" +
-      "- confidence: 0-100\n" +
-      "- reasoning: ONE sentence explaining why (reference specific field names and diff values)\n\n" +
-      "IMPORTANT: Keep reasoning to ONE concise sentence per assignment. Do NOT include breaks with no matching keys.\n\n" +
+      "You are a senior financial reconciliation analyst specializing in Murex MX.3.\n\n" +
+      "DOMAIN CONTEXT:\n" +
+      "- Each break includes: trade_id, typology (product type like IRS, FX_Option, Bond), asset_class (IR/FX/EQ/COM), currency, portfolio\n" +
+      "- fieldDiffs shows ONLY the mismatched fields with valueA, valueB, numericDiff\n" +
+      "- When a rule mentions 'interest rate products' it means typology IN (IRS, IR_Option, Bond, Deposit, Repo, etc.)\n" +
+      "- When a rule mentions 'options' it means typology contains 'Option' or 'Barrier'\n" +
+      "- When a rule mentions 'GBP products' check the currency field\n\n" +
+      "TASK: For each break, evaluate ALL rules. Assign EVERY key whose rule matches. " +
+      "A break CAN have multiple keys. Only assign if confidence >= 60.\n\n" +
+      "For each assignment:\n" +
+      "- keyCode, confidence (0-100)\n" +
+      "- reasoning: ONE sentence referencing the specific typology, currency, and field values that match the rule\n\n" +
+      "Do NOT include breaks where no rule matches.\n\n" +
       'Return JSON: { "assignments": [{ "trade_id": "...", "keys": [{ "keyCode": "...", "confidence": 85, "reasoning": "..." }] }] }'
 
     const client = getAIClient()
