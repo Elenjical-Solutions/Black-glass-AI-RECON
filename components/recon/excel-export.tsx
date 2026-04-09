@@ -2,6 +2,11 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
+} from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Download, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { getResultsAction, getResultDetailsAction } from "@/actions/results-actions"
@@ -27,7 +32,7 @@ function hexToArgb(hex: string): string {
   return `FF${hex.replace("#", "").padEnd(6, "0")}`
 }
 
-function lightenHex(hex: string, amount = 0.85): string {
+function lightenHex(hex: string, amount = 0.82): string {
   const c = hex.replace("#", "")
   const r = Math.round(parseInt(c.substring(0, 2), 16) + (255 - parseInt(c.substring(0, 2), 16)) * amount)
   const g = Math.round(parseInt(c.substring(2, 4), 16) + (255 - parseInt(c.substring(2, 4), 16)) * amount)
@@ -40,16 +45,22 @@ export function ExcelExport(props: ExcelExportProps) {
     runId, definitionName, category, department, fileAName, fileBName,
     totalRows, matched, breaks, explained, unexplained, explanationKeys, fieldMappingNames,
   } = props
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [includeMatches, setIncludeMatches] = useState(true)
+  const [includeBreaks, setIncludeBreaks] = useState(true)
+  const [includeSummary, setIncludeSummary] = useState(true)
+  const [includeKeys, setIncludeKeys] = useState(true)
 
   async function handleExport() {
     setExporting(true)
-    toast.info("Generating Excel... loading all results")
+    setDialogOpen(false)
 
     try {
       const ExcelJS = (await import("exceljs")).default
+      toast.info("Loading results...")
 
-      // ── Load all results ──
+      // Load all results
       const allResults: any[] = []
       let page = 1
       let hasMore = true
@@ -62,44 +73,41 @@ export function ExcelExport(props: ExcelExportProps) {
         } else { hasMore = false }
       }
 
-      // ── Load field details for ALL results (not just breaks) ──
-      toast.info(`Loading field details for ${Math.min(allResults.length, 500)} rows...`)
+      // Load field details
+      toast.info(`Loading field details...`)
       const fieldDetailsMap = new Map<string, any[]>()
       for (const r of allResults.slice(0, 500)) {
         const id = r.id ?? r.result?.id
         if (!id) continue
         const detail = await getResultDetailsAction(id)
-        if (detail.status === "success") {
-          fieldDetailsMap.set(id, detail.data.fieldDetails)
-        }
+        if (detail.status === "success") fieldDetailsMap.set(id, detail.data.fieldDetails)
       }
 
-      // ── Discover all field names from the details ──
+      // Discover field names
       const allFieldNames: string[] = []
       const fieldNameSet = new Set<string>()
       for (const details of fieldDetailsMap.values()) {
         for (const fd of details) {
           const name = fieldMappingNames[fd.fieldMappingId] ?? fd.fieldMappingId
-          if (!fieldNameSet.has(name)) {
-            fieldNameSet.add(name)
-            allFieldNames.push(name)
-          }
+          if (!fieldNameSet.has(name)) { fieldNameSet.add(name); allFieldNames.push(name) }
         }
       }
 
       const keyById = new Map(explanationKeys.map(k => [k.id, k]))
 
-      // ── Styles ──
-      const headerFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1a1f2e" } }
-      const headerFont: any = { bold: true, color: { argb: "FFe2e8f0" }, size: 10 }
-      const matchFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0d3320" } }
-      const matchFont: any = { color: { argb: "FF4ade80" }, bold: true }
-      const breakFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FF3b1111" } }
-      const breakFont: any = { color: { argb: "FFf87171" }, bold: true }
-      const mismatchBg: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF0F0" } }
-      const mismatchFont: any = { color: { argb: "FFdc2626" } }
-      const matchCellBg: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0FFF4" } }
-      const titleFont: any = { bold: true, size: 14, color: { argb: "FF38bdf8" } }
+      // ── Light-mode Excel styles (white/light backgrounds, dark text) ──
+      const headerFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } }
+      const headerFont: any = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 }
+      const matchStatusFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } }
+      const matchStatusFont: any = { color: { argb: "FF166534" }, bold: true }
+      const breakStatusFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEE2E2" } }
+      const breakStatusFont: any = { color: { argb: "FF991B1B" }, bold: true }
+      const missingFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFBEB" } }
+      const missingFont: any = { color: { argb: "FF92400E" }, bold: true }
+      const mismatchCellFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEF2F2" } }
+      const mismatchCellFont: any = { color: { argb: "FFDC2626" } }
+      const matchCellFill: any = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0FDF4" } }
+      const titleFont: any = { bold: true, size: 14, color: { argb: "FF1e40af" } }
 
       function parseKeys(aiText: string | null, expKey: any) {
         const entries: Array<{ code: string; conf: string; reasoning: string; color: string }> = []
@@ -112,196 +120,160 @@ export function ExcelExport(props: ExcelExportProps) {
             }
           }
         }
-        if (entries.length === 0 && expKey) {
-          entries.push({ code: expKey.code ?? "", conf: "", reasoning: "", color: expKey.color ?? "#6366f1" })
-        }
+        if (entries.length === 0 && expKey) entries.push({ code: expKey.code ?? "", conf: "", reasoning: "", color: expKey.color ?? "#6366f1" })
         return entries
       }
 
       const wb = new ExcelJS.Workbook()
       wb.creator = "Black Glass AI RECON"
 
-      // ═══ Tab 1: Summary ═══
-      const ws1 = wb.addWorksheet("Summary")
-      ws1.columns = [{ width: 22 }, { width: 18 }, { width: 12 }]
-      ws1.addRow([definitionName]).font = titleFont
-      ws1.addRow([])
-      ws1.addRow(["Category", category ?? "—"])
-      ws1.addRow(["Department", department ?? "—"])
-      ws1.addRow(["Source A", fileAName ?? "—"])
-      ws1.addRow(["Source B", fileBName ?? "—"])
-      ws1.addRow([])
-      ws1.addRow(["Metric", "Count", "%"]).eachCell((c: any) => { c.fill = headerFill; c.font = headerFont })
+      // ═══ Tab: Summary ═══
+      if (includeSummary) {
+        const ws = wb.addWorksheet("Summary")
+        ws.columns = [{ width: 22 }, { width: 18 }, { width: 12 }]
+        ws.addRow([definitionName]).font = titleFont
+        ws.addRow([])
+        ws.addRow(["Category", category ?? "—"]).getCell(1).font = { bold: true }
+        ws.addRow(["Department", department ?? "—"]).getCell(1).font = { bold: true }
+        ws.addRow(["Source A", fileAName ?? "—"]).getCell(1).font = { bold: true }
+        ws.addRow(["Source B", fileBName ?? "—"]).getCell(1).font = { bold: true }
+        ws.addRow([])
+        ws.addRow(["Metric", "Count", "%"]).eachCell((c: any) => { c.fill = headerFill; c.font = headerFont })
 
-      const addMetric = (label: string, value: number, pct: string, fill: any, font: any) => {
-        const row = ws1.addRow([label, value, pct])
-        row.eachCell((c: any) => { c.fill = fill; c.font = font })
+        const addM = (label: string, val: number, pct: string, fill: any, font: any) => {
+          const row = ws.addRow([label, val, pct])
+          row.getCell(1).font = { bold: true }
+          row.getCell(2).font = { ...font, size: 12 }
+          row.getCell(2).fill = fill
+        }
+        addM("Total Rows", totalRows, "100%", { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } }, { bold: true })
+        addM("Matched", matched, totalRows > 0 ? `${((matched / totalRows) * 100).toFixed(1)}%` : "—", matchStatusFill, matchStatusFont)
+        addM("Breaks", breaks, totalRows > 0 ? `${((breaks / totalRows) * 100).toFixed(1)}%` : "—", breakStatusFill, breakStatusFont)
+        addM("Explained", explained, breaks > 0 ? `${((explained / breaks) * 100).toFixed(1)}%` : "—",
+          { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFBEB" } }, { color: { argb: "FF92400E" }, bold: true })
+        addM("Unexplained", unexplained, breaks > 0 ? `${((unexplained / breaks) * 100).toFixed(1)}%` : "—",
+          { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF7ED" } }, { color: { argb: "FF9A3412" }, bold: true })
+        ws.addRow([])
+        ws.addRow(["Exported", new Date().toLocaleString()])
       }
-      addMetric("Total Rows", totalRows, "100%", { type: "pattern", pattern: "solid", fgColor: { argb: "FF1e2433" } }, { bold: true })
-      addMetric("Matched", matched, totalRows > 0 ? `${((matched / totalRows) * 100).toFixed(1)}%` : "—", matchFill, matchFont)
-      addMetric("Breaks", breaks, totalRows > 0 ? `${((breaks / totalRows) * 100).toFixed(1)}%` : "—", breakFill, breakFont)
-      addMetric("Explained", explained, breaks > 0 ? `${((explained / breaks) * 100).toFixed(1)}%` : "—",
-        { type: "pattern", pattern: "solid", fgColor: { argb: "FF3b2e0a" } }, { color: { argb: "FFfbbf24" }, bold: true })
-      addMetric("Unexplained", unexplained, breaks > 0 ? `${((unexplained / breaks) * 100).toFixed(1)}%` : "—",
-        { type: "pattern", pattern: "solid", fgColor: { argb: "FF3b1a0a" } }, { color: { argb: "FFfb923c" }, bold: true })
-      ws1.addRow([])
-      ws1.addRow(["Exported", new Date().toLocaleString()])
 
-      // ═══ Helper: build a results sheet with field columns ═══
-      function buildResultsSheet(name: string, rows: any[], includeReasoning: boolean) {
+      // ═══ Helper: build results sheet ═══
+      function buildSheet(name: string, rows: any[], showReasoning: boolean) {
         const ws = wb.addWorksheet(name)
 
-        // Header: Row Key | Status | Keys | Confidence | [field (A) | field (B) | field (Diff)] ... | Reasoning?
         const headers: string[] = ["Row Key", "Status", "Explanation Keys", "Confidence"]
-        for (const fn of allFieldNames) {
-          headers.push(`${fn} (A)`, `${fn} (B)`, `${fn} (Diff)`)
-        }
-        if (includeReasoning) headers.push("AI Reasoning")
+        for (const fn of allFieldNames) headers.push(`${fn} (A)`, `${fn} (B)`, `${fn} (Diff)`)
+        if (showReasoning) headers.push("AI Reasoning")
 
         ws.addRow(headers)
-
-        // Style header — two-level: fixed cols are dark, field cols alternate light blue/light cyan for A/B
-        const headerRow = ws.getRow(1)
-        headerRow.height = 28
-        headerRow.eachCell((cell: any, colNumber: number) => {
+        const hr = ws.getRow(1)
+        hr.height = 26
+        hr.eachCell((cell: any, col: number) => {
           cell.font = headerFont
           cell.alignment = { vertical: "middle", wrapText: true }
-          if (colNumber <= 4) {
-            cell.fill = headerFill
-          } else if (includeReasoning && colNumber === headers.length) {
+          if (col <= 4 || (showReasoning && col === headers.length)) {
             cell.fill = headerFill
           } else {
-            // Field columns: A=blue tint, B=cyan tint, Diff=gray
-            const fieldOffset = (colNumber - 5) % 3
-            if (fieldOffset === 0) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1e3a5f" } } // A
-            else if (fieldOffset === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1a4040" } } // B
-            else cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2a2a3a" } } // Diff
+            const offset = (col - 5) % 3
+            if (offset === 0) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF3B82F6" } } // A blue
+            else if (offset === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0891B2" } } // B cyan
+            else cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF6B7280" } } // Diff gray
           }
         })
 
-        // Column widths
-        const colWidths: any[] = [
-          { width: 22 }, { width: 10 }, { width: 28 }, { width: 10 },
-        ]
-        for (const _ of allFieldNames) {
-          colWidths.push({ width: 16 }, { width: 16 }, { width: 12 })
-        }
-        if (includeReasoning) colWidths.push({ width: 60 })
-        ws.columns = colWidths
-
+        const colW: any[] = [{ width: 20 }, { width: 10 }, { width: 26 }, { width: 10 }]
+        for (const _ of allFieldNames) colW.push({ width: 15 }, { width: 15 }, { width: 11 })
+        if (showReasoning) colW.push({ width: 55 })
+        ws.columns = colW
         ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: headers.length } }
-        // Freeze first row + first 4 columns
         ws.views = [{ state: "frozen", xSplit: 4, ySplit: 1 }]
 
-        // Data rows
         for (const r of rows) {
           const id = r.id ?? r.result?.id
           const status = r.status ?? r.result?.status ?? ""
-          const rowKey = r.rowKeyValue ?? r.result?.rowKeyValue ?? ""
           const aiText = (r.aiExplanation ?? r.result?.aiExplanation ?? "") as string
           const expKey = r.explanationKey ?? (r.explanationKeyId ? keyById.get(r.explanationKeyId) : null)
           const entries = parseKeys(aiText, expKey)
           const details = id ? (fieldDetailsMap.get(id) ?? []) : []
 
-          // Build field lookup: fieldName -> detail
           const detailByField = new Map<string, any>()
           for (const fd of details) {
-            const name = fieldMappingNames[fd.fieldMappingId] ?? fd.fieldMappingId
-            detailByField.set(name, fd)
+            detailByField.set(fieldMappingNames[fd.fieldMappingId] ?? fd.fieldMappingId, fd)
           }
 
           const rowData: any[] = [
-            rowKey,
+            r.rowKeyValue ?? "",
             status,
             entries.map(e => e.code).join("; "),
             entries.map(e => e.conf ? `${e.conf}%` : "").filter(Boolean).join("; "),
           ]
-
-          // Field values
-          const mismatchCols: number[] = []
-          for (let fi = 0; fi < allFieldNames.length; fi++) {
-            const fd = detailByField.get(allFieldNames[fi])
-            const colStart = 5 + fi * 3 // 1-indexed column numbers
-            if (fd) {
-              rowData.push(fd.valueA ?? "", fd.valueB ?? "", fd.numericDiff ?? "")
-              if (!fd.isMatch) {
-                mismatchCols.push(colStart, colStart + 1, colStart + 2)
-              }
-            } else {
-              rowData.push("", "", "")
-            }
+          for (const fn of allFieldNames) {
+            const fd = detailByField.get(fn)
+            rowData.push(fd?.valueA ?? "", fd?.valueB ?? "", fd?.numericDiff ?? "")
           }
-
-          if (includeReasoning) {
-            rowData.push(entries.map(e => `[${e.code}] ${e.reasoning}`).join(" | ") || "")
-          }
+          if (showReasoning) rowData.push(entries.map(e => `[${e.code}] ${e.reasoning}`).join(" | ") || "")
 
           const excelRow = ws.addRow(rowData)
 
-          // Color status cell
-          const statusCell = excelRow.getCell(2)
-          if (status === "match") {
-            statusCell.fill = matchFill; statusCell.font = matchFont
-          } else if (status === "break") {
-            statusCell.fill = breakFill; statusCell.font = breakFont
-          } else if (status === "missing_a" || status === "missing_b") {
-            statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF3b2e0a" } }
-            statusCell.font = { color: { argb: "FFfbbf24" } }
-          }
+          // Status cell color
+          const sc = excelRow.getCell(2)
+          if (status === "match") { sc.fill = matchStatusFill; sc.font = matchStatusFont }
+          else if (status === "break") { sc.fill = breakStatusFill; sc.font = breakStatusFont }
+          else { sc.fill = missingFill; sc.font = missingFont }
 
-          // Color key cell
+          // Key cell color
           if (entries.length > 0 && entries[0].color) {
-            const keyCell = excelRow.getCell(3)
-            keyCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: lightenHex(entries[0].color, 0.88) } }
-            keyCell.font = { color: { argb: hexToArgb(entries[0].color) }, bold: true, size: 10 }
+            const kc = excelRow.getCell(3)
+            kc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: lightenHex(entries[0].color) } }
+            kc.font = { color: { argb: hexToArgb(entries[0].color) }, bold: true, size: 10 }
           }
 
-          // Color mismatched field cells RED, matched GREEN
+          // Field cells: red mismatch, green match
           for (let fi = 0; fi < allFieldNames.length; fi++) {
             const fd = detailByField.get(allFieldNames[fi])
             if (!fd) continue
-            const colA = 5 + fi * 3
-            const colB = colA + 1
-            const colDiff = colA + 2
+            const cA = 5 + fi * 3, cB = cA + 1, cD = cA + 2
             if (!fd.isMatch) {
-              excelRow.getCell(colA).fill = mismatchBg
-              excelRow.getCell(colA).font = mismatchFont
-              excelRow.getCell(colB).fill = mismatchBg
-              excelRow.getCell(colB).font = mismatchFont
-              excelRow.getCell(colDiff).fill = mismatchBg
-              excelRow.getCell(colDiff).font = { ...mismatchFont, bold: true }
+              excelRow.getCell(cA).fill = mismatchCellFill; excelRow.getCell(cA).font = mismatchCellFont
+              excelRow.getCell(cB).fill = mismatchCellFill; excelRow.getCell(cB).font = mismatchCellFont
+              excelRow.getCell(cD).fill = mismatchCellFill; excelRow.getCell(cD).font = { ...mismatchCellFont, bold: true }
             } else {
-              excelRow.getCell(colA).fill = matchCellBg
-              excelRow.getCell(colB).fill = matchCellBg
+              excelRow.getCell(cA).fill = matchCellFill
+              excelRow.getCell(cB).fill = matchCellFill
             }
           }
         }
       }
 
-      // ═══ Tab 2: All Results ═══
-      buildResultsSheet("All Results", allResults, false)
+      // Build sheets based on user selection
+      if (includeMatches && includeBreaks) {
+        buildSheet("All Results", allResults, false)
+      }
+      if (includeBreaks) {
+        const breakOnly = allResults.filter(r => (r.status ?? r.result?.status) !== "match")
+        buildSheet("Breaks Detail", breakOnly, true)
+      }
+      if (includeMatches && !includeBreaks) {
+        const matchOnly = allResults.filter(r => (r.status ?? r.result?.status) === "match")
+        buildSheet("Matches", matchOnly, false)
+      }
 
-      // ═══ Tab 3: Breaks Only ═══
-      const breakOnly = allResults.filter(r => (r.status ?? r.result?.status) === "break")
-      buildResultsSheet("Breaks Detail", breakOnly, true)
-
-      // ═══ Tab 4: Explanation Keys ═══
-      const ws4 = wb.addWorksheet("Explanation Keys")
-      ws4.columns = [{ width: 4 }, { width: 24 }, { width: 36 }, { width: 50 }, { width: 65 }]
-      ws4.addRow(["", "Code", "Label", "Description", "Natural Language Rule"])
-      ws4.getRow(1).eachCell((c: any) => { c.fill = headerFill; c.font = headerFont })
-
-      for (const k of explanationKeys) {
-        const row = ws4.addRow(["", k.code, k.label, k.description ?? "", (k as any).naturalLanguageRule ?? ""])
-        row.getCell(4).alignment = { wrapText: true }
-        row.getCell(5).alignment = { wrapText: true }
-        if (k.color) {
-          row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: hexToArgb(k.color) } }
-          row.getCell(2).font = { color: { argb: hexToArgb(k.color) }, bold: true }
+      // Explanation Keys tab
+      if (includeKeys) {
+        const ws = wb.addWorksheet("Explanation Keys")
+        ws.columns = [{ width: 4 }, { width: 24 }, { width: 36 }, { width: 50 }, { width: 65 }]
+        ws.addRow(["", "Code", "Label", "Description", "Natural Language Rule"]).eachCell((c: any) => { c.fill = headerFill; c.font = headerFont })
+        for (const k of explanationKeys) {
+          const row = ws.addRow(["", k.code, k.label, k.description ?? "", (k as any).naturalLanguageRule ?? ""])
+          row.getCell(4).alignment = { wrapText: true }
+          row.getCell(5).alignment = { wrapText: true }
+          if (k.color) {
+            row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: hexToArgb(k.color) } }
+            row.getCell(2).font = { color: { argb: hexToArgb(k.color) }, bold: true }
+          }
         }
       }
 
-      // ── Download ──
       const buffer = await wb.xlsx.writeBuffer()
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
       const url = URL.createObjectURL(blob)
@@ -319,9 +291,57 @@ export function ExcelExport(props: ExcelExportProps) {
   }
 
   return (
-    <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={handleExport} disabled={exporting}>
-      {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-      {exporting ? "Exporting..." : "Export Excel"}
-    </Button>
+    <>
+      <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={() => setDialogOpen(true)} disabled={exporting}>
+        {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+        {exporting ? "Exporting..." : "Export Excel"}
+      </Button>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Export to Excel</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">Choose what to include in the export:</p>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <Checkbox checked={includeSummary} onCheckedChange={v => setIncludeSummary(!!v)} />
+              <div>
+                <span className="text-sm font-medium">Summary tab</span>
+                <p className="text-xs text-muted-foreground">Recon info, matched/break/explained counts</p>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <Checkbox checked={includeMatches} onCheckedChange={v => setIncludeMatches(!!v)} />
+              <div>
+                <span className="text-sm font-medium">Matched rows</span>
+                <p className="text-xs text-muted-foreground">{matched.toLocaleString()} rows where all fields match</p>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <Checkbox checked={includeBreaks} onCheckedChange={v => setIncludeBreaks(!!v)} />
+              <div>
+                <span className="text-sm font-medium">Breaks &amp; differences</span>
+                <p className="text-xs text-muted-foreground">{breaks.toLocaleString()} breaks with field details + AI reasoning</p>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <Checkbox checked={includeKeys} onCheckedChange={v => setIncludeKeys(!!v)} />
+              <div>
+                <span className="text-sm font-medium">Explanation keys reference</span>
+                <p className="text-xs text-muted-foreground">{explanationKeys.length} keys with NL rules</p>
+              </div>
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleExport} disabled={!includeMatches && !includeBreaks}>
+              <Download className="h-4 w-4 mr-1.5" />
+              Export
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
